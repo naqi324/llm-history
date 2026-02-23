@@ -29,7 +29,9 @@ Save the current Claude Code session's context to the Obsidian vault as a struct
 
 1. Generate a brief slug (2-4 words, kebab-case) that captures the primary task or project of this session.
 2. Format the date as YYMMDD using today's date.
-3. Use the Glob tool to check for existing files in `/Users/naqi.khan/Documents/Obsidian/LLM History/` matching the glob pattern `YYMMDD-<slug>*.md`.
+3. Check for existing files with the same date-slug prefix to handle deduplication:
+   - **If Obsidian is running**: use `obsidian search query="YYMMDD-<slug>" folder="LLM History"` via the obsidian-cli skill.
+   - **Fallback**: use the Glob tool to check `/Users/naqi.khan/Documents/Obsidian/LLM History/` matching `YYMMDD-<slug>*.md`.
 4. If no match exists, use `YYMMDD-<slug>.md`.
 5. If matches exist, find the highest numeric suffix and increment it. For example, if `260222-auth-flow.md` and `260222-auth-flow-2.md` exist, use `260222-auth-flow-3.md`.
 
@@ -45,20 +47,30 @@ Analyze the full conversation to extract:
 - **Next steps**: Specific, actionable items numbered in priority order.
 - **Warnings and blockers**: Anything the next session must know — failed approaches, known bugs, environment requirements, pending PRs.
 
-### Step 3: Determine Context Usage
+### Step 3: Retrieve Session ID
+
+Run the following Bash command to get the current session ID:
+
+```bash
+ls -t ~/.claude/projects/*/*.jsonl 2>/dev/null | head -1 | xargs basename -s .jsonl
+```
+
+This returns the UUID of the most recently active transcript, which is the current session. Always include this in the `session_id` frontmatter field.
+
+### Step 4: Determine Context Usage
 
 Check the current context window usage. If you can determine the approximate percentage (from the status line or your own awareness), include it. Otherwise, write "unknown".
 
-### Step 4: Write the File
+### Step 5: Write the File
 
-Write the file using the Write tool with this structure:
+Write the file using the Write tool to `/Users/naqi.khan/Documents/Obsidian/LLM History/<filename>.md` with this structure:
 
 ```
 ---
 date: YYYY-MM-DD
 model: <model name, e.g., Claude Opus 4.6>
 project: <project directory path, use ~ for home>
-session_id: <session ID if available, otherwise omit>
+session_id: <session UUID from Step 3>
 context_usage: <approximate percentage, e.g., ~75%>
 trigger: manual
 tags:
@@ -103,7 +115,7 @@ tags:
 - <Omit this section entirely if there are none>
 ```
 
-### Step 5: Confirm
+### Step 6: Confirm
 
 After writing the file, report to the user:
 - The full file path
