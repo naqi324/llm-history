@@ -5,6 +5,9 @@
 
 set -euo pipefail
 
+# Allow claude -p to run from within hook context (hooks inherit CLAUDECODE env var)
+unset CLAUDECODE 2>/dev/null || true
+
 VAULT_DIR="/Users/naqi.khan/Documents/Obsidian/LLM History"
 LOCKDIR="/tmp/llm-history-locks"
 
@@ -46,6 +49,7 @@ fi
 
 # Guard 5: Session deduplication — skip if already saved for this session+event
 mkdir -p "$LOCKDIR"
+LOCK_FILE=""
 if [ -n "$SESSION_ID" ]; then
   LOCK_FILE="$LOCKDIR/${SESSION_ID}-${HOOK_EVENT}.saved"
   if [ -f "$LOCK_FILE" ]; then
@@ -65,7 +69,7 @@ FIRST_PROMPT=$(jq -r '
   | select(.type == "text")
   | .text
 ' "$TRANSCRIPT_PATH" 2>/dev/null \
-  | grep -v '^\[' \
+  | { grep -v '^\[' || true; } \
   | head -1 \
   | cut -c1-200)
 
@@ -82,7 +86,9 @@ else
     | cut -c1-40)
 fi
 
-[ -z "$SLUG" ] && SLUG="session"
+if [ -z "$SLUG" ]; then
+  SLUG="session"
+fi
 
 # Deduplication: find next available filename
 BASE_NAME="${DATE_YYMMDD}-${SLUG}"
@@ -100,15 +106,26 @@ done
 # Shorten home path for display
 PROJECT_DIR="${CWD/#\/Users\/naqi.khan/~}"
 
-# Extract transcript excerpt (last 4000 lines to stay within input limits)
-TRANSCRIPT_EXCERPT=$(tail -4000 "$TRANSCRIPT_PATH")
+# Extract only text content from transcript (skip tool calls, tool results, snapshots)
+# This dramatically reduces size vs sending raw JSONL
+TRANSCRIPT_TEXT=$(jq -r '
+  select(.type == "user" or .type == "assistant")
+  | .message.content[]?
+  | select(.type == "text")
+  | .text
+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -3000)
+
+# If no text content extracted, use last_assistant_message as fallback input
+if [ -z "$TRANSCRIPT_TEXT" ]; then
+  TRANSCRIPT_TEXT=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
+fi
 
 # Call claude in print mode to generate the summary body
-SUMMARY=$(echo "$TRANSCRIPT_EXCERPT" | claude -p \
+SUMMARY=$(echo "$TRANSCRIPT_TEXT" | claude -p \
   --model sonnet \
   --no-session-persistence \
   "You are generating a session context file for future Claude Code session resumption.
-Analyze this Claude Code session transcript (JSONL format) and produce ONLY the markdown body content (no YAML frontmatter — I will add that separately).
+Analyze this conversation text and produce ONLY the markdown body content (no YAML frontmatter — I will add that separately).
 
 Use exactly these sections:
 
@@ -174,7 +191,7 @@ ${SUMMARY}
 FRONTMATTER_EOF
 
 # Mark session as saved for dedup
-if [ -n "$SESSION_ID" ]; then
+if [ -n "$LOCK_FILE" ]; then
   touch "$LOCK_FILE"
 fi
 
