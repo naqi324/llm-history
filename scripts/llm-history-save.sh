@@ -57,12 +57,22 @@ if [ -n "$SESSION_ID" ]; then
   fi
 fi
 
+# Guard 6: Skip if this session already has a saved file (manual /llm-history or prior hook)
+if [ -n "$SESSION_ID" ]; then
+  EXISTING=$(grep -rl "session_id: ${SESSION_ID}" "$VAULT_DIR" 2>/dev/null | head -1)
+  if [ -n "$EXISTING" ]; then
+    [ -n "$LOCK_FILE" ] && touch "$LOCK_FILE"
+    exit 0
+  fi
+fi
+
 # --- Generate filename ---
 
 DATE_YYMMDD=$(date +%y%m%d)
 DATE_ISO=$(date +%Y-%m-%d)
 
 # Extract slug from the first substantive user message in the transcript
+# Filter out system-reminders, skill instructions, XML tags, and markdown headers
 FIRST_PROMPT=$(jq -r '
   select(.type == "user")
   | .message.content[]?
@@ -70,6 +80,10 @@ FIRST_PROMPT=$(jq -r '
   | .text
 ' "$TRANSCRIPT_PATH" 2>/dev/null \
   | { grep -v '^\[' || true; } \
+  | { grep -v '^<' || true; } \
+  | { grep -v -i '^base directory' || true; } \
+  | { grep -v '^#' || true; } \
+  | { grep -v '^\s*$' || true; } \
   | head -1 \
   | cut -c1-200)
 
@@ -155,11 +169,14 @@ Rules:
 
 # Fallback if claude -p fails
 if [ -z "$SUMMARY" ]; then
-  # Extract last assistant message from hook input as minimal fallback
   LAST_MSG=$(echo "$INPUT" | jq -r '.last_assistant_message // "No summary available."')
   SUMMARY="## Executive Summary
 
-Auto-save triggered ($HOOK_EVENT) but detailed summary generation was unavailable.
+Auto-save triggered ($HOOK_EVENT) for project \`${PROJECT_DIR}\` but detailed summary generation was unavailable.
+
+## Session Topic
+
+${FIRST_PROMPT:-No user prompt extracted.}
 
 ## Last Assistant Message
 
