@@ -87,39 +87,20 @@ fi
 
 DATE_YYMMDD=$(date +%y%m%d)
 DATE_ISO=$(date +%Y-%m-%d)
+SAVED_AT=$(date -Iseconds)
 
-# Extract slug from the first substantive user message in the transcript
-# Filter out system-reminders, skill instructions, XML tags, and markdown headers
-FIRST_PROMPT=$(jq -r '
-  select(.type == "user")
-  | .message.content[]?
-  | select(.type == "text")
-  | .text
-' "$TRANSCRIPT_PATH" 2>>"$LOGFILE" \
-  | { grep -v '^\[' || true; } \
-  | { grep -v '^<' || true; } \
-  | { grep -v -i '^base directory' || true; } \
-  | { grep -v '^#' || true; } \
-  | { grep -v '^\s*$' || true; } \
-  | head -1 \
-  | cut -c1-200) || { log "WARN: jq failed extracting FIRST_PROMPT (session=$SESSION_ID)"; true; }
+# Project slug from CWD basename (reliable — no JSONL parsing needed)
+# The JSONL transcript stores user-typed prompts as tool_result content, not text blocks.
+# The only text blocks in user messages are skill injection text, which produces
+# broken slugs like "you-provide-structured-objective". CWD basename is always meaningful.
+SLUG=$(basename "$CWD" 2>/dev/null \
+  | tr '[:upper:]' '[:lower:]' \
+  | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//' \
+  | cut -c1-25)
+[ -z "$SLUG" ] && SLUG="session"
 
-if [ -z "$FIRST_PROMPT" ]; then
-  SLUG="session"
-else
-  # Generate slug: lowercase, strip non-alnum, take first 4 words, kebab-case
-  SLUG=$(echo "$FIRST_PROMPT" \
-    | tr '[:upper:]' '[:lower:]' \
-    | sed 's/[^a-z0-9 ]//g' \
-    | sed 's/  */ /g' \
-    | awk '{for(i=1;i<=NF&&i<=4;i++) printf "%s-", $i}' \
-    | sed 's/-$//' \
-    | cut -c1-40)
-fi
-
-if [ -z "$SLUG" ]; then
-  SLUG="session"
-fi
+# Keep FIRST_PROMPT for backward compat with current worker (removed in v2 worker)
+FIRST_PROMPT="(project: $SLUG)"
 
 # Deduplication: find next available filename
 BASE_NAME="${DATE_YYMMDD}-${SLUG}"
@@ -154,11 +135,12 @@ jq -n \
   --arg file_path "$FILE_PATH" \
   --arg base_name "$BASE_NAME" \
   --arg date_iso "$DATE_ISO" \
+  --arg saved_at "$SAVED_AT" \
   --arg hook_input_json "$INPUT" \
   '{transcript_path: $transcript_path, cwd: $cwd, hook_event: $hook_event,
     session_id: $session_id, first_prompt: $first_prompt, slug: $slug,
     file_path: $file_path, base_name: $base_name, date_iso: $date_iso,
-    hook_input_json: $hook_input_json}' > "$WORK_FILE"
+    saved_at: $saved_at, hook_input_json: $hook_input_json}' > "$WORK_FILE"
 
 # Launch detached worker — survives parent exit/SIGHUP
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
