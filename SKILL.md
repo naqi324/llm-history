@@ -1,9 +1,9 @@
 ---
 name: llm-history
-description: Saves session context to Obsidian vault for seamless resumption. Use when users say save session, save context, llm history, save progress, snapshot session, preserve context, or before exiting.
+description: Saves session context to Obsidian vault for seamless resumption. Use when users say save session, save context, llm history, save progress, snapshot session, preserve context, checkpoint work, or before exiting. Also use proactively when a session involves significant work that would be costly to reconstruct.
 metadata:
   author: naqi-khan
-  version: "1.0.0"
+  version: "2.0.0"
   category: workflow-automation
   tags: session-management, obsidian, context-preservation
 ---
@@ -16,24 +16,24 @@ Save the current Claude Code session's context to the Obsidian vault as a struct
 
 1. ALWAYS write the output file to `/Users/naqi.khan/Documents/Obsidian/LLM History/`.
 2. NEVER skip the YAML frontmatter block.
-3. ALWAYS check for existing files with the same date-slug prefix before writing, to handle deduplication.
+3. ALWAYS check for existing files with the same date-project prefix before writing, to handle deduplication.
 4. Keep the file under 500 lines. Prioritize actionable context over exhaustive logs.
-5. File names MUST use the format `YYMMDD-<brief-slug>.md` (e.g., `260222-refactor-auth-flow.md`).
-6. For multiple saves in the same session, append a numeric suffix: `-2`, `-3`, etc.
+5. File names MUST use the format `YYMMDD-<project>.md` where `<project>` is the CWD basename in kebab-case.
+6. For multiple saves on the same date/project, append a numeric suffix: `-2`, `-3`, etc.
 7. NEVER include full tool outputs, raw API responses, or verbose logs — summarize them.
-8. DO include enough context that a fresh Claude Code session can pick up the work with no additional explanation.
+8. Include enough context that a fresh Claude Code session can resume with zero re-reading of source files.
+9. For writing/editing tasks, include the final deliverable text or a substantial excerpt.
 
 ## Workflow
 
 ### Step 1: Determine File Name
 
-1. Generate a brief slug (2-4 words, kebab-case) that captures the primary task or project of this session.
+1. Get the project slug from the CWD basename: lowercase, kebab-case, max 25 chars.
 2. Format the date as YYMMDD using today's date.
-3. Check for existing files with the same date-slug prefix to handle deduplication:
-   - **If Obsidian is running**: use `obsidian search query="YYMMDD-<slug>" folder="LLM History"` via the obsidian-cli skill.
-   - **Fallback**: use the Glob tool to check `/Users/naqi.khan/Documents/Obsidian/LLM History/` matching `YYMMDD-<slug>*.md`.
-4. If no match exists, use `YYMMDD-<slug>.md`.
-5. If matches exist, find the highest numeric suffix and increment it. For example, if `260222-auth-flow.md` and `260222-auth-flow-2.md` exist, use `260222-auth-flow-3.md`.
+3. Check for existing files with the same date-project prefix to handle deduplication:
+   - Use the Glob tool to check `/Users/naqi.khan/Documents/Obsidian/LLM History/` matching `YYMMDD-<project>*.md`.
+4. If no match exists, use `YYMMDD-<project>.md`.
+5. If matches exist, find the highest numeric suffix and increment it.
 
 ### Step 2: Gather Context
 
@@ -68,10 +68,13 @@ Write the file using the Write tool to `/Users/naqi.khan/Documents/Obsidian/LLM 
 ```
 ---
 date: YYYY-MM-DD
+saved_at: <current ISO 8601 timestamp with timezone>
+title: '<descriptive 5-10 word session title>'
 model: <model name, e.g., Claude Opus 4.6>
 project: <project directory path, use ~ for home>
 session_id: <session UUID from Step 3>
 context_usage: <approximate percentage, e.g., ~75%>
+status: <completed | in-progress | blocked>
 trigger: manual
 tags:
   - <derived-tag-1>
@@ -79,7 +82,7 @@ tags:
   - <up to 5 tags derived from session content>
 ---
 
-# <Descriptive Session Title>
+# <Descriptive 5-10 Word Session Title>
 
 ## Executive Summary
 
@@ -115,10 +118,15 @@ tags:
 - <Omit this section entirely if there are none>
 ```
 
+Key guidance:
+- The H1 title should be a descriptive 5-10 word phrase about what was accomplished, NOT the filename.
+- Derive 3-5 tags from session content — never use generic "llm-history" or "auto-save" for manual saves.
+- The `status` field should reflect whether the work is completed, in-progress, or blocked.
+- Use single quotes around the `title` value in YAML frontmatter to handle special characters.
+
 ### Step 6: Confirm
 
 After writing the file, report to the user:
 - The full file path
 - A one-line summary of what was saved
 - The file size (approximate line count)
-
