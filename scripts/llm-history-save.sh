@@ -73,7 +73,7 @@ fi
 
 # Guard 6: Skip if this session already has a saved file (manual /llm-history or prior hook)
 if [ -n "$SESSION_ID" ]; then
-  EXISTING=$(grep -rl "session_id: ${SESSION_ID}" "$VAULT_DIR" 2>/dev/null | head -1)
+  EXISTING=$(grep -rl "session_id: ${SESSION_ID}" "$VAULT_DIR" 2>/dev/null | head -1) || true
   if [ -n "$EXISTING" ]; then
     log "SKIP: Guard 6 existing=$EXISTING session=$SESSION_ID"
     [ -n "$LOCK_FILE" ] && touch "$LOCK_FILE"
