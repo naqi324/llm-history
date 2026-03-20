@@ -9,6 +9,7 @@ set -euo pipefail
 
 LOGFILE="/tmp/llm-history-hook.log"
 log() { echo "[$(date -Iseconds)] $*" >> "$LOGFILE" 2>/dev/null; }
+trap 'log "ERROR at line $LINENO (session=${SESSION_ID:-unknown})"' ERR
 
 # Trim log when > 500 lines
 if [ -f "$LOGFILE" ] && [ "$(wc -l < "$LOGFILE" | tr -d ' ')" -gt 500 ]; then
@@ -20,6 +21,7 @@ LOCKDIR="/tmp/llm-history-locks"
 
 # Read hook input from stdin
 INPUT=$(cat)
+log "START input_length=${#INPUT}"
 
 # Parse fields from hook JSON
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""')
