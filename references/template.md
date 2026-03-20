@@ -12,6 +12,7 @@ Reference documentation for the markdown files produced by the llm-history skill
 | model          | string | yes      | Model used (e.g., "Claude Opus 4.6")             |
 | project        | string | yes      | Project directory path (~ for home)              |
 | session_id     | string | no       | Claude Code session identifier                   |
+| session_name   | string | no       | Claude Code auto-assigned session name            |
 | context_usage  | string | no       | Approximate context window usage (manual only)   |
 | status         | string | yes      | completed, in-progress, blocked, or unknown      |
 | trigger        | string | yes      | What triggered the save: manual, Stop, PreCompact|

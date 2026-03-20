@@ -46,6 +46,9 @@ log "START session=$SESSION_ID event=$HOOK_EVENT"
 # Shorten home path for display
 PROJECT_DIR="${CWD/#\/Users\/naqi.khan/~}"
 
+# Extract session name (Claude Code auto-assigns, e.g., "upgrade-llm-history-skill")
+SESSION_NAME=$(jq -r 'select(.type == "custom-title") | .customTitle' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
+
 # Extract only assistant text from transcript — assistant messages describe actual
 # work done. User messages contain mostly tool_results and skill injection text
 # which pollutes the summary.
@@ -108,8 +111,8 @@ if [ -n "$SUMMARY" ]; then
   TAGS_CSV=$(echo "$SUMMARY" | grep -m1 '^TAGS:' | sed 's/^TAGS: *//') || true
   STATUS=$(echo "$SUMMARY" | grep -m1 '^STATUS:' | sed 's/^STATUS: *//' | tr '[:upper:]' '[:lower:]') || true
 
-  # Strip metadata lines from body (first 5 lines only to avoid false positives)
-  SUMMARY=$(echo "$SUMMARY" | sed '1,5{/^TITLE:/d; /^TAGS:/d; /^STATUS:/d}')
+  # Strip metadata lines from body (portable — BSD sed doesn't support {cmd;cmd} grouping)
+  SUMMARY=$(echo "$SUMMARY" | sed '/^TITLE:/d; /^TAGS:/d; /^STATUS:/d')
 fi
 
 # --- Fallback if claude -p failed or timed out ---
@@ -175,6 +178,7 @@ title: '${TITLE_YAML}'
 model: auto-saved (sonnet)
 project: ${PROJECT_DIR}
 session_id: ${SESSION_ID}
+session_name: ${SESSION_NAME}
 status: ${STATUS}
 trigger: ${HOOK_EVENT}
 tags:
