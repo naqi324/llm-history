@@ -5,8 +5,11 @@ Session context preservation skill for Claude Code. Saves structured markdown fi
 ## Structure
 
 - `SKILL.md` — Skill definition (manual `/llm-history` invocation)
-- `scripts/llm-history-save.sh` — Hook script for automatic Stop/PreCompact saves
+- `AGENTS.md` — Codex CLI/Desktop instructions
+- `scripts/llm-history-save.sh` — Hook dispatcher (fast guards + fork worker)
+- `scripts/llm-history-worker.sh` — Detached worker (claude -p summarization + file write)
 - `references/template.md` — Output format documentation
+- `references/prompt.md` — Externalized claude -p prompt
 
 ## Output Directory
 
@@ -15,5 +18,15 @@ Session context preservation skill for Claude Code. Saves structured markdown fi
 ## Hooks
 
 Configured in `~/.claude/settings.json`:
-- `Stop` hook — auto-saves on session exit
-- `PreCompact` hook — auto-saves when context window triggers compaction
+- `Stop` hook — auto-saves on session exit (async)
+- `PreCompact` hook — auto-saves when context window triggers compaction (async)
+- `SessionEnd` hook — final save on session teardown (sync)
+
+## Distribution
+
+| Surface | Read | Write | Mechanism |
+|---------|------|-------|-----------|
+| Claude Code CLI | QMD MCP | Auto (hooks) + manual | `~/.claude/skills/llm-history` symlink |
+| Claude Desktop | QMD MCP | N/A | QMD indexes Obsidian vault |
+| Codex CLI | QMD MCP | Manual only | `~/.agents/skills/llm-history` symlink |
+| Codex Desktop | QMD MCP | Manual only | Same as Codex CLI |
