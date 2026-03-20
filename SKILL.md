@@ -122,12 +122,3 @@ After writing the file, report to the user:
 - A one-line summary of what was saved
 - The file size (approximate line count)
 
-## Proactive Behavior
-
-This skill should also be offered proactively by Claude when:
-- The user mentions exiting, quitting, stopping, or ending the session
-- The user says they need to take a break or will come back later
-- The conversation has been long and productive with significant accumulated context
-- Context window pressure appears high (compaction has occurred or is imminent)
-
-When offering proactively, say: "Want me to save session context before we wrap up? (`/llm-history`)"

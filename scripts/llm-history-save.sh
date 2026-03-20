@@ -61,6 +61,7 @@ fi
 if [ -n "$SESSION_ID" ]; then
   EXISTING=$(grep -rl "session_id: ${SESSION_ID}" "$VAULT_DIR" 2>/dev/null | head -1)
   if [ -n "$EXISTING" ]; then
+    echo "[$(date -Iseconds)] Guard 6 skip: session=$SESSION_ID existing=$EXISTING" >> /tmp/llm-history-guard6.log 2>/dev/null
     [ -n "$LOCK_FILE" ] && touch "$LOCK_FILE"
     exit 0
   fi
@@ -138,6 +139,7 @@ fi
 SUMMARY=$(echo "$TRANSCRIPT_TEXT" | claude -p \
   --model sonnet \
   --no-session-persistence \
+  --strict-mcp-config \
   "You are generating a session context file for future Claude Code session resumption.
 Analyze this conversation text and produce ONLY the markdown body content (no YAML frontmatter — I will add that separately).
 
