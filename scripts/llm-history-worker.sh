@@ -2,6 +2,7 @@
 # llm-history-worker.sh — Detached worker that generates and saves LLM history
 # Launched by llm-history-save.sh via nohup; survives parent exit/SIGHUP.
 # Reads all input from a temp work file (JSON) passed as $1.
+# v2: assistant-only extraction, structured metadata parsing, YAML-safe output.
 
 set -euo pipefail
 # NOTE: pipefail means ALL command substitutions with jq/grep pipelines
@@ -29,11 +30,14 @@ TRANSCRIPT_PATH=$(jq -r '.transcript_path' "$WORK_FILE")
 CWD=$(jq -r '.cwd' "$WORK_FILE")
 HOOK_EVENT=$(jq -r '.hook_event' "$WORK_FILE")
 SESSION_ID=$(jq -r '.session_id' "$WORK_FILE")
-FIRST_PROMPT=$(jq -r '.first_prompt' "$WORK_FILE")
 FILE_PATH=$(jq -r '.file_path' "$WORK_FILE")
 BASE_NAME=$(jq -r '.base_name' "$WORK_FILE")
 DATE_ISO=$(jq -r '.date_iso' "$WORK_FILE")
+SAVED_AT=$(jq -r '.saved_at // ""' "$WORK_FILE")
 HOOK_INPUT_JSON=$(jq -r '.hook_input_json' "$WORK_FILE")
+
+# Fallback if saved_at missing (backward compat with pre-v2 dispatcher)
+[ -z "$SAVED_AT" ] && SAVED_AT=$(date -Iseconds)
 
 log "START session=$SESSION_ID event=$HOOK_EVENT"
 
@@ -42,9 +46,11 @@ log "START session=$SESSION_ID event=$HOOK_EVENT"
 # Shorten home path for display
 PROJECT_DIR="${CWD/#\/Users\/naqi.khan/~}"
 
-# Extract only text content from transcript (skip tool calls, tool results, snapshots)
+# Extract only assistant text from transcript — assistant messages describe actual
+# work done. User messages contain mostly tool_results and skill injection text
+# which pollutes the summary.
 TRANSCRIPT_TEXT=$(jq -r '
-  select(.type == "user" or .type == "assistant")
+  select(.type == "assistant")
   | .message.content[]?
   | select(.type == "text")
   | .text
@@ -53,6 +59,24 @@ TRANSCRIPT_TEXT=$(jq -r '
 # If no text content extracted, use last_assistant_message as fallback input
 if [ -z "$TRANSCRIPT_TEXT" ]; then
   TRANSCRIPT_TEXT=$(echo "$HOOK_INPUT_JSON" | jq -r '.last_assistant_message // ""')
+fi
+
+# Load prompt from external file with inline fallback
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROMPT_FILE="$SCRIPT_DIR/../references/prompt.md"
+if [ -f "$PROMPT_FILE" ]; then
+  PROMPT_TEXT=$(cat "$PROMPT_FILE")
+else
+  log "WARN: prompt file missing ($PROMPT_FILE), using inline fallback"
+  PROMPT_TEXT="You are generating a session context file for future Claude Code session resumption.
+Analyze this conversation text and produce ONLY the markdown body content (no YAML frontmatter).
+
+FIRST LINE must be: TITLE: <descriptive 5-10 word title>
+SECOND LINE must be: TAGS: <3-5 comma-separated lowercase tags>
+THIRD LINE must be: STATUS: <completed|in-progress|blocked>
+
+Then sections: Executive Summary, Key Decisions, In-Progress Work, Relevant Files, Next Steps, Warnings and Blockers.
+Be concise. Focus on what someone needs to pick up this work fresh. Under 200 lines."
 fi
 
 # Detect timeout command (GNU coreutils; not available on stock macOS)
@@ -71,49 +95,46 @@ SUMMARY=$(echo "$TRANSCRIPT_TEXT" | run_with_timeout claude -p \
   --model sonnet \
   --no-session-persistence \
   --strict-mcp-config \
-  "You are generating a session context file for future Claude Code session resumption.
-Analyze this conversation text and produce ONLY the markdown body content (no YAML frontmatter — I will add that separately).
+  "$PROMPT_TEXT" 2>/dev/null) || true
 
-Use exactly these sections:
+# --- Parse structured metadata from claude -p response ---
 
-## Executive Summary
-(2-4 sentences: what was accomplished, what the session was about)
+TITLE=""
+TAGS_CSV=""
+STATUS=""
 
-## Key Decisions
-(Bulleted list. Each bullet: **Decision**: Rationale. Omit if no significant decisions were made.)
+if [ -n "$SUMMARY" ]; then
+  TITLE=$(echo "$SUMMARY" | grep -m1 '^TITLE:' | sed 's/^TITLE: *//' | head -c 100) || true
+  TAGS_CSV=$(echo "$SUMMARY" | grep -m1 '^TAGS:' | sed 's/^TAGS: *//') || true
+  STATUS=$(echo "$SUMMARY" | grep -m1 '^STATUS:' | sed 's/^STATUS: *//' | tr '[:upper:]' '[:lower:]') || true
 
-## In-Progress Work
-(Current state of incomplete work with enough detail to resume. Omit if everything was completed.)
+  # Strip metadata lines from body (first 5 lines only to avoid false positives)
+  SUMMARY=$(echo "$SUMMARY" | sed '1,5{/^TITLE:/d; /^TAGS:/d; /^STATUS:/d}')
+fi
 
-## Relevant Files
-(Bulleted list of file paths that were created/modified, with brief notes on what was done. Omit if none.)
+# --- Fallback if claude -p failed or timed out ---
 
-## Next Steps
-(Numbered list of specific actionable items remaining. Always include this section.)
-
-## Warnings and Blockers
-(Any caveats, failed approaches, or blockers the next session must know. Omit if none.)
-
-Rules:
-- Be concise. Focus on what someone needs to pick up this work in a fresh session.
-- Never include raw tool outputs or verbose logs.
-- Include file paths as \`inline code\`.
-- Keep under 200 lines total." 2>/dev/null) || true
-
-# Fallback if claude -p fails or times out
 if [ -z "$SUMMARY" ]; then
+  log "WARN: claude -p failed, building structured fallback"
+
+  # Last assistant text blocks (the actual work descriptions)
+  RECENT_CONTEXT=$(jq -r '
+    select(.type == "assistant")
+    | .message.content[]?
+    | select(.type == "text")
+    | .text
+  ' "$TRANSCRIPT_PATH" 2>>"$LOGFILE" | tail -80) || true
+
   LAST_MSG=$(echo "$HOOK_INPUT_JSON" | jq -r '.last_assistant_message // ""')
-  # Handle missing last_assistant_message (e.g., SessionEnd trigger)
-  if [ -z "$LAST_MSG" ]; then
-    LAST_MSG="(Session context unavailable — triggered via $HOOK_EVENT)"
-  fi
+  [ -z "$LAST_MSG" ] && LAST_MSG="(Session context unavailable — triggered via $HOOK_EVENT)"
+
   SUMMARY="## Executive Summary
 
-Auto-save triggered ($HOOK_EVENT) for project \`${PROJECT_DIR}\` but detailed summary generation was unavailable.
+Auto-save triggered ($HOOK_EVENT) for project \`${PROJECT_DIR}\`. LLM summarization was unavailable; this is a structured extraction from the transcript.
 
-## Session Topic
+## Recent Work Context
 
-${FIRST_PROMPT:-No user prompt extracted.}
+${RECENT_CONTEXT:-No assistant text extracted.}
 
 ## Last Assistant Message
 
@@ -121,28 +142,49 @@ $LAST_MSG
 
 ## Next Steps
 
-1. Review the session transcript for full context.
-2. Re-run \`/llm-history\` manually in a new session for a richer summary."
+1. Review this file and re-run \`/llm-history\` manually for a richer summary."
+
+  TITLE="${PROJECT_DIR} — auto-save ($HOOK_EVENT)"
+  STATUS="unknown"
 fi
+
+# --- Validate and default metadata ---
+
+case "$STATUS" in completed|in-progress|blocked) ;; *) STATUS="unknown" ;; esac
+[ -z "$TITLE" ] && TITLE="${PROJECT_DIR} session"
+
+# Convert tags CSV to YAML list
+if [ -n "$TAGS_CSV" ]; then
+  TAGS_YAML=$(echo "$TAGS_CSV" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sed 's/^/  - /')
+else
+  TAGS_YAML="  - llm-history
+  - auto-save"
+fi
+
+# YAML-safe title: single-quote with '' escaping for embedded single quotes
+TITLE_YAML=$(echo "$TITLE" | sed "s/'/''/g")
 
 # --- Write the output file ---
 
+# Frontmatter with controlled variable expansion
 cat > "$FILE_PATH" << FRONTMATTER_EOF
 ---
 date: ${DATE_ISO}
+saved_at: ${SAVED_AT}
+title: '${TITLE_YAML}'
 model: auto-saved (sonnet)
 project: ${PROJECT_DIR}
 session_id: ${SESSION_ID}
+status: ${STATUS}
 trigger: ${HOOK_EVENT}
 tags:
-  - llm-history
-  - auto-save
+${TAGS_YAML}
 ---
 
-# ${BASE_NAME}
-
-${SUMMARY}
 FRONTMATTER_EOF
+
+# Append H1 title and body using printf to avoid shell expansion in SUMMARY
+printf '# %s\n\n%s\n' "$TITLE" "$SUMMARY" >> "$FILE_PATH"
 
 log "DONE session=$SESSION_ID -> $FILE_PATH"
 
