@@ -17,7 +17,7 @@ Save the current Claude Code session's context to the Obsidian vault as a struct
 1. ALWAYS write the output file to `/Users/naqi.khan/Documents/Obsidian/LLM History/`.
 2. NEVER skip the YAML frontmatter block.
 3. ALWAYS check for existing files with the same date-project prefix before writing, to handle deduplication.
-4. Keep the file under 500 lines. Prioritize actionable context over exhaustive logs.
+4. Keep the file under 300 lines. Prioritize actionable specifics over narrative.
 5. File names MUST use the format `YYMMDD-<project>.md` where `<project>` is the CWD basename in kebab-case.
 6. For multiple saves on the same date/project, append a numeric suffix: `-2`, `-3`, etc.
 7. NEVER include full tool outputs, raw API responses, or verbose logs — summarize them.
@@ -37,15 +37,15 @@ Save the current Claude Code session's context to the Obsidian vault as a struct
 
 ### Step 2: Gather Context
 
-Analyze the full conversation to extract:
+Analyze the full conversation to extract the following. Write for a Claude Code session that has NEVER seen this codebase — every section must be self-contained and actionable.
 
-- **Executive summary**: What was accomplished in 2-4 sentences.
-- **Key decisions**: Each decision with its rationale (why, not just what).
-- **In-progress work**: Current state of anything incomplete, with enough detail to resume without re-reading code.
-- **Relevant files**: File paths that were created, modified, or are central to the work. Include brief descriptions of what was done to each.
-- **Key code context**: Only include code snippets that are essential for resumption — new functions, tricky logic, API contracts. Keep these minimal.
-- **Next steps**: Specific, actionable items numbered in priority order.
-- **Warnings and blockers**: Anything the next session must know — failed approaches, known bugs, environment requirements, pending PRs.
+- **Executive summary**: 2-4 sentences stating (1) what the task was, (2) what was accomplished, (3) what remains. Be specific — not "updated config files" but "rewrote auth middleware to use JWT across 3 route handlers."
+- **Key decisions**: For each decision, include: what was chosen, what was rejected, why, and what failure mode was avoided. This prevents the next session from re-debating settled questions.
+- **Working state**: The exact state of the codebase RIGHT NOW — what is done and verified, what is untested, what is partially done (with the exact interruption point), what hasn't started. Include branch name, uncommitted changes, active config/hooks.
+- **Files changed**: Each file path with what specifically was changed (not just "updated") and its current state (working/untested/broken). Include 1-3 code snippets ONLY when they show non-obvious logic. Use `file:line` references.
+- **Concrete next steps**: Each step must include the exact command, file path, or specific check. Never write "review the code" — specify WHICH file, WHICH function, WHAT to verify.
+- **Failed approaches**: What was tried and didn't work, with the specific error or reason. Prevents retrying dead ends.
+- **Warnings**: Environment requirements, known bugs, fragile assumptions, or platform-specific gotchas.
 
 ### Step 3: Retrieve Session ID
 
@@ -86,36 +86,35 @@ tags:
 
 ## Executive Summary
 
-<2-4 sentences summarizing what was accomplished and the overall outcome>
+<2-4 sentences: (1) what the task was, (2) what was accomplished, (3) what remains>
 
 ## Key Decisions
 
-- **<Decision 1>**: <Rationale — why this approach was chosen>
-- **<Decision 2>**: <Rationale>
+- **<What was chosen>** over <what was rejected>: <Why — concrete reason>. <What would go wrong with the rejected approach.>
 
-## In-Progress Work
+## Working State
 
-<Current state of any incomplete work. Include branch names, partially implemented features, or pending changes. Provide enough detail that a fresh session can resume without re-reading all the code.>
+<Exact codebase state: what's done+verified, what's untested, what's partial (with interruption point), what hasn't started. Branch, uncommitted changes, active config/hooks.>
 
-## Relevant Files
+## Files Changed
 
-- `path/to/file1.ext` — <what was done or why it matters>
-- `path/to/file2.ext` — <what was done or why it matters>
+- `path/to/file1.ext` — <specific change made, current state>
+- `path/to/file2.ext` — <specific change made, current state>
 
-### Key Code Context
+<Include 1-3 code snippets only when they show non-obvious logic. Use file:line refs.>
 
-<Only include code snippets that are genuinely essential for resumption. Use fenced code blocks with language identifiers. Omit this subsection entirely if no snippets are needed.>
+## Concrete Next Steps
 
-## Next Steps
+1. <Exact command or file path — independently executable, no ambiguity>
+2. <Next step with expected output or success criteria>
 
-1. <Specific actionable item with enough context to execute>
-2. <Next item>
-3. <Next item>
+## Failed Approaches
 
-## Warnings and Blockers
+- <What was tried, the specific error, why it didn't work. Omit section if nothing failed.>
 
-- <Any important caveats, failed approaches, environment issues, or blockers>
-- <Omit this section entirely if there are none>
+## Warnings
+
+- <Environment requirements, known bugs, fragile assumptions. Omit section if none.>
 ```
 
 Key guidance:

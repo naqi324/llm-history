@@ -71,15 +71,15 @@ if [ -f "$PROMPT_FILE" ]; then
   PROMPT_TEXT=$(cat "$PROMPT_FILE")
 else
   log "WARN: prompt file missing ($PROMPT_FILE), using inline fallback"
-  PROMPT_TEXT="You are generating a session context file for future Claude Code session resumption.
-Analyze this conversation text and produce ONLY the markdown body content (no YAML frontmatter).
+  PROMPT_TEXT="You are generating a session handoff document for Claude Code session resumption.
+Analyze this conversation and produce ONLY markdown body content (no YAML frontmatter).
 
-FIRST LINE must be: TITLE: <descriptive 5-10 word title>
-SECOND LINE must be: TAGS: <3-5 comma-separated lowercase tags>
-THIRD LINE must be: STATUS: <completed|in-progress|blocked>
+FIRST LINE: TITLE: <descriptive 5-10 word title>
+SECOND LINE: TAGS: <3-5 comma-separated lowercase tags>
+THIRD LINE: STATUS: <completed|in-progress|blocked>
 
-Then sections: Executive Summary, Key Decisions, In-Progress Work, Relevant Files, Next Steps, Warnings and Blockers.
-Be concise. Focus on what someone needs to pick up this work fresh. Under 200 lines."
+Then sections: Executive Summary (what/accomplished/remains), Key Decisions (chosen vs rejected + why), Working State (exact codebase state right now), Files Changed (path + specific change), Concrete Next Steps (exact commands, not vague), Failed Approaches (what didn't work + why), Warnings.
+Write for a session that has NEVER seen this code. Every decision must include what was rejected. Every next step must include the exact command or file path. Under 300 lines."
 fi
 
 # Detect timeout command (GNU coreutils; not available on stock macOS)
