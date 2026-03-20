@@ -7,12 +7,15 @@ Reference documentation for the markdown files produced by the llm-history skill
 | Field          | Type   | Required | Description                                      |
 |----------------|--------|----------|--------------------------------------------------|
 | date           | date   | yes      | Session date (YYYY-MM-DD)                        |
+| saved_at       | string | yes      | ISO 8601 timestamp with timezone when saved       |
+| title          | string | yes      | Descriptive session title from claude -p          |
 | model          | string | yes      | Model used (e.g., "Claude Opus 4.6")             |
 | project        | string | yes      | Project directory path (~ for home)              |
 | session_id     | string | no       | Claude Code session identifier                   |
-| context_usage  | string | no       | Approximate context window usage at save time    |
+| context_usage  | string | no       | Approximate context window usage (manual only)   |
+| status         | string | yes      | completed, in-progress, blocked, or unknown      |
 | trigger        | string | yes      | What triggered the save: manual, Stop, PreCompact|
-| tags           | list   | yes      | 2-5 tags derived from session content            |
+| tags           | list   | yes      | 3-5 tags derived from session content            |
 
 ## Body Sections
 
@@ -39,13 +42,14 @@ Caveats, failed approaches, environment requirements, or blockers. Omit if none.
 
 ## File Naming Convention
 
-- Format: `YYMMDD-<brief-slug>.md`
-- Slug: 2-4 words, kebab-case, derived from the primary task
-- Deduplication: append `-2`, `-3`, etc. for multiple saves on the same date with the same slug
+- Format: `YYMMDD-<project>.md`
+- Project slug: derived from CWD basename (lowercase, kebab-case, max 25 chars)
+- Deduplication: append `-2`, `-3`, etc. for multiple saves on the same date with the same project
+- Descriptive task naming lives in the H1 heading and `title` frontmatter field
 - Examples:
-  - `260222-refactor-auth-flow.md`
-  - `260222-refactor-auth-flow-2.md`
-  - `260223-fix-payment-webhook.md`
+  - `260320-llm-history.md`
+  - `260319-browser.md`
+  - `260320-llm-history-2.md`
 
 ## Target Directory
 
