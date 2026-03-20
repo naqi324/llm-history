@@ -6,6 +6,8 @@
 # for the slow claude -p summarization.
 
 set -euo pipefail
+# NOTE: pipefail means ALL command substitutions with jq/grep pipelines
+# must use || true — jq returns non-zero on any malformed JSONL line.
 
 LOGFILE="/tmp/llm-history-hook.log"
 log() { echo "[$(date -Iseconds)] $*" >> "$LOGFILE" 2>/dev/null; }
@@ -93,14 +95,14 @@ FIRST_PROMPT=$(jq -r '
   | .message.content[]?
   | select(.type == "text")
   | .text
-' "$TRANSCRIPT_PATH" 2>/dev/null \
+' "$TRANSCRIPT_PATH" 2>>"$LOGFILE" \
   | { grep -v '^\[' || true; } \
   | { grep -v '^<' || true; } \
   | { grep -v -i '^base directory' || true; } \
   | { grep -v '^#' || true; } \
   | { grep -v '^\s*$' || true; } \
   | head -1 \
-  | cut -c1-200)
+  | cut -c1-200) || { log "WARN: jq failed extracting FIRST_PROMPT (session=$SESSION_ID)"; true; }
 
 if [ -z "$FIRST_PROMPT" ]; then
   SLUG="session"

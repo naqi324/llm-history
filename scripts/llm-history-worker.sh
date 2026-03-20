@@ -4,6 +4,8 @@
 # Reads all input from a temp work file (JSON) passed as $1.
 
 set -euo pipefail
+# NOTE: pipefail means ALL command substitutions with jq/grep pipelines
+# must use || true — jq returns non-zero on any malformed JSONL line.
 
 # Worker runs in its own process — independently unset CLAUDECODE
 unset CLAUDECODE 2>/dev/null || true
@@ -46,15 +48,26 @@ TRANSCRIPT_TEXT=$(jq -r '
   | .message.content[]?
   | select(.type == "text")
   | .text
-' "$TRANSCRIPT_PATH" 2>/dev/null | tail -3000)
+' "$TRANSCRIPT_PATH" 2>>"$LOGFILE" | tail -3000) || { log "WARN: jq failed extracting transcript text"; true; }
 
 # If no text content extracted, use last_assistant_message as fallback input
 if [ -z "$TRANSCRIPT_TEXT" ]; then
   TRANSCRIPT_TEXT=$(echo "$HOOK_INPUT_JSON" | jq -r '.last_assistant_message // ""')
 fi
 
+# Detect timeout command (GNU coreutils; not available on stock macOS)
+run_with_timeout() {
+  if command -v timeout &>/dev/null; then
+    timeout 90 "$@"
+  elif command -v gtimeout &>/dev/null; then
+    gtimeout 90 "$@"
+  else
+    "$@"
+  fi
+}
+
 # Call claude -p with timeout to prevent orphan workers on API failure
-SUMMARY=$(echo "$TRANSCRIPT_TEXT" | timeout 90 claude -p \
+SUMMARY=$(echo "$TRANSCRIPT_TEXT" | run_with_timeout claude -p \
   --model sonnet \
   --no-session-persistence \
   --strict-mcp-config \
