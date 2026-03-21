@@ -62,14 +62,22 @@ if [ "$TRANSCRIPT_LINES" -lt 10 ]; then
   exit 0
 fi
 
-# Guard 5: Session deduplication — event-agnostic lock shared by Stop and SessionEnd
+# Guard 5: Session deduplication — allow re-save if transcript has grown significantly
+# Resumed sessions keep the same session_id but accumulate new work. The lock file
+# stores the transcript line count from the last save. If the transcript has grown
+# by 50+ lines, allow a new save (the filename dedup counter handles -2, -3 suffixes).
 mkdir -p "$LOCKDIR"
 LOCK_FILE=""
 if [ -n "$SESSION_ID" ]; then
   LOCK_FILE="$LOCKDIR/${SESSION_ID}-save.saved"
   if [ -f "$LOCK_FILE" ]; then
-    log "SKIP: already saved (lock=$LOCK_FILE) session=$SESSION_ID"
-    exit 0
+    PREV_LINES=$(cat "$LOCK_FILE" 2>/dev/null | tr -d ' ')
+    if [ -n "$PREV_LINES" ] && [ "$TRANSCRIPT_LINES" -gt "$((PREV_LINES + 50))" ]; then
+      log "RESAVE: transcript grew from $PREV_LINES to $TRANSCRIPT_LINES lines session=$SESSION_ID"
+    else
+      log "SKIP: already saved (prev=${PREV_LINES:-0} now=$TRANSCRIPT_LINES) session=$SESSION_ID"
+      exit 0
+    fi
   fi
 fi
 
@@ -78,7 +86,7 @@ if [ -n "$SESSION_ID" ]; then
   EXISTING=$(grep -rl "session_id: ${SESSION_ID}" "$VAULT_DIR" 2>/dev/null | head -1) || true
   if [ -n "$EXISTING" ]; then
     log "SKIP: Guard 6 existing=$EXISTING session=$SESSION_ID"
-    [ -n "$LOCK_FILE" ] && touch "$LOCK_FILE"
+    [ -n "$LOCK_FILE" ] && echo "$TRANSCRIPT_LINES" > "$LOCK_FILE"
     exit 0
   fi
 fi
@@ -115,9 +123,10 @@ done
 
 # --- Claim lock and dispatch worker ---
 
-# Create lock immediately (before forking) to prevent race between Stop and SessionEnd
+# Write transcript line count to lock (before forking) to prevent race between Stop and SessionEnd
+# Storing the count enables re-save detection when a resumed session accumulates new work
 if [ -n "$LOCK_FILE" ]; then
-  touch "$LOCK_FILE"
+  echo "$TRANSCRIPT_LINES" > "$LOCK_FILE"
 fi
 
 # Clean up stale temp files from crashed workers (older than 1 day)
