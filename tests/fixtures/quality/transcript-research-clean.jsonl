@@ -1,0 +1,7 @@
+{"type":"custom-title","customTitle":"research-clean-session"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Investigate why llm-history auto-saves are still generic."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I am comparing the recent auto-saved history files against the stronger manual handoffs."}]}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-research-list","name":"Bash","input":{"command":"ls -1t \"/Users/naqi.khan/Documents/Obsidian/LLM History\" | head -10"}}]}}}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-research-read","name":"Read","input":{"file_path":"__PROJECT_ROOT__/notes/research.md"}}]}}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The auto-saved files usually have generic tags and rarely capture working state or concrete next steps."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"No code changes have landed yet; this pass is still collecting evidence before we patch the worker."}]}}

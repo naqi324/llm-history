@@ -1,0 +1,12 @@
+{"type":"custom-title","customTitle":"fixture-session"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reviewed dispatcher guard behavior and lock-file format."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Please harden the save path."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Switched from raw numeric locks to key-value locks with timestamps."}]}}
+{"type":"progress","data":{"type":"status","message":"running tests"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Added environment overrides for the vault, lock, and log locations."}]}}
+{"type":"system","subtype":"metadata","message":"fixture"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Need to verify resumed sessions create -2 files after meaningful growth."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hardened the worker so malformed Claude output falls back instead of being saved raw."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Please add tests."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Added a smoke harness with temp directories and a stub Claude binary."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Next step is verifying the prompt payload stays structured end-to-end."}]}}

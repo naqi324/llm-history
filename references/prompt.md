@@ -1,83 +1,55 @@
 You are generating a session handoff document. Its sole purpose is enabling a fresh Claude Code session to resume this work with zero re-reading of source files and zero re-debating of settled decisions.
 
+The prompt will provide grounded facts in labeled sections such as `SESSION FACTS`, `REPO FACTS`, `TOOL FACTS`, `DERIVED FACTS`, and `ASSISTANT NARRATIVE`.
+
+You MUST use only those facts.
+- If a fact is missing, write `unknown`.
+- Never guess.
+- Never ask a question or request clarification.
+
 Your output MUST begin with exactly these three metadata lines before any markdown:
 
 TITLE: <descriptive 5-10 word title for what was accomplished>
-TAGS: <3-5 comma-separated lowercase tags derived from content>
+TAGS: <3-5 comma-separated lowercase tags derived from the grounded facts>
 STATUS: <completed|in-progress|blocked>
 
 Then use these sections:
 
 ## Executive Summary
-2-4 sentences. State: (1) what the task was, (2) what was accomplished, (3) what remains. Be specific — not "updated config files" but "rewrote auth middleware to use JWT instead of session cookies across 3 route handlers."
-
-## Key Decisions
-For each significant decision:
-- **What was chosen**: The specific approach taken
-- **What was rejected**: The alternative(s) considered
-- **Why**: The concrete reason — performance, compatibility, simplicity, etc.
-- **Failure mode avoided**: What would go wrong with the rejected approach
-
-This section prevents the next session from re-debating settled questions.
-Bad: "Used assistant-only extraction"
-Good: "Used assistant-only extraction instead of filtering user messages because user message text blocks in the JSONL only contain skill injection text ('You provide structured, objective critique...'), not actual user prompts. Filtering user messages would still pass through this garbage."
-
-Omit section if no significant decisions.
+2-4 sentences. State: (1) what the task was, (2) what was accomplished, (3) what remains. Anchor the summary in the grounded facts, not generic filler.
 
 ## Working State
-The exact state of the codebase RIGHT NOW:
-- What is done and verified working (with how it was verified)
-- What is done but untested
-- What is partially done (with exact point of interruption)
-- What has NOT been started
-- Branch name if not main
-- Uncommitted changes if any
-- Config/environment state (what's configured, what hooks are active, what services are running)
+Describe the exact state RIGHT NOW using the grounded repo/tool/session facts:
+- branch, repo cleanliness, recent verification/checks
+- what is done, untested, partial, or still pending
+- config or environment state if the facts mention it
 
-Bad: "All changes committed"
-Good: "6 commits on main, all pushed to origin. The dispatcher (save.sh) and worker (worker.sh) are updated. Hook config in ~/.claude/settings.json is unchanged — Stop/PreCompact/SessionEnd all point to save.sh. Lock dir at /tmp/llm-history-locks/ was manually cleared."
-
-Omit section if trivial (e.g., a single quick-answer session).
+Always include this section for nontrivial sessions.
 
 ## Files Changed
-For each file created or modified:
-- Full path
-- What specifically was changed (not just "updated" — the actual change)
-- Current state (working? needs testing? has known issue?)
+List the concrete files touched in the grounded facts and what happened to them. If no files were changed, say so explicitly.
 
-Include 1-3 essential code snippets ONLY when they show non-obvious logic a new session must understand. Use `file:line` references when pointing to specific locations.
-
-Omit section if no files were changed.
+Always include this section for nontrivial sessions.
 
 ## Concrete Next Steps
-Numbered list. Each step must be independently actionable — include exact commands, file paths, or specific checks. No ambiguity.
-
-Bad: "Test the output quality"
-Good: "1. Exit a Claude Code session and wait 30s
-2. Check log: tail -5 /tmp/llm-history-worker.log
-3. Expected output: DONE session=<uuid> -> /path/to/file.md
-4. Open the .md file and verify: saved_at has timezone, title is descriptive, tags are content-derived"
+Numbered list. Each step must be independently actionable and must include an exact command, file path, or specific check.
 
 Always include this section.
 
+## Key Decisions
+Optional. Include only when the grounded facts clearly show a meaningful decision and its rationale.
+
 ## Failed Approaches
-What was tried and didn't work, with the specific error or reason it failed. Prevents the next session from retrying dead ends.
-
-Bad: "Tried a different approach first"
-Good: "Tried extracting user prompts from JSONL text blocks, but user message text blocks only contain skill injection content ('Base directory for this skill: ...'), not the actual user-typed prompt. The real prompt is stored as tool_result content which is not extractable as plain text."
-
-Omit section if nothing failed.
+Optional. Include only when the grounded facts show a real failure, blocker, or rejected path.
 
 ## Warnings
-Environment requirements, known bugs, fragile assumptions, platform-specific gotchas, or things that will break if assumptions change. Omit section if none.
+Optional. Include environment requirements, fragile assumptions, or caveats only when the grounded facts support them.
 
 Rules:
 - Write for a Claude Code session that has NEVER seen this codebase.
-- Every decision must include what was rejected and why.
-- Every next step must include the exact command, file path, or specific action.
-- Include before/after examples when explaining fixes (what the bug looked like vs. the fix).
-- Show what success looks like (expected output, log lines, file state).
-- Never say "review the code" — specify WHICH file, WHICH function, WHAT to check.
-- For writing/editing tasks, include the key deliverable text or a substantial excerpt.
-- For git operations, list commits with their messages and SHAs.
-- Keep under 300 lines total. Prioritize actionable specifics over narrative.
+- Never use a path-only title or a title ending in `session`.
+- Never use generic-only tags like `llm-history, auto-save, workflow` when grounded facts provide better tags.
+- Never omit `## Executive Summary`, `## Working State`, `## Files Changed`, or `## Concrete Next Steps` for a nontrivial session.
+- Never say "review the code" or "keep going" without a concrete command or file path.
+- Mention grounded commands and file paths verbatim when they are central to resumption.
+- Keep under 300 lines total. Prioritize grounded specifics over narrative.

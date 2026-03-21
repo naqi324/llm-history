@@ -1,0 +1,6 @@
+{"type":"custom-title","customTitle":"noop-session"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Can you save this session?"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I only have a tiny amount of context so far, but I can still capture the current grounded state."}]}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-noop-read","name":"Read","input":{"file_path":"__PROJECT_ROOT__/README.md"}}]}}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"No files were edited in this session; the current state is mostly orientation and repo inspection."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"If the session continues, the next useful step is deciding which file or workflow to change."}]}}

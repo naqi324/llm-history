@@ -11,13 +11,238 @@ set -euo pipefail
 # Worker runs in its own process — independently unset CLAUDECODE
 unset CLAUDECODE 2>/dev/null || true
 
-LOGFILE="/tmp/llm-history-worker.log"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOGFILE="${LLM_HISTORY_WORKER_LOGFILE:-/tmp/llm-history-worker.log}"
+CLAUDE_BIN="${LLM_HISTORY_CLAUDE_BIN:-claude}"
 WORK_FILE="${1:?Usage: llm-history-worker.sh <work-file>}"
+CONTEXT_HELPER="${LLM_HISTORY_CONTEXT_HELPER:-$SCRIPT_DIR/llm-history-context.py}"
+RENDER_MODE="${LLM_HISTORY_RENDER_MODE:-standard}"
+
+mkdir -p "$(dirname "$LOGFILE")"
 
 log() { echo "[$(date -Iseconds)] $*" >> "$LOGFILE" 2>/dev/null; }
 cleanup() { rm -f "$WORK_FILE" 2>/dev/null; }
 trap cleanup EXIT
 trap 'log "ERROR: session=${SESSION_ID:-unknown} line=$LINENO"; exit 1' ERR
+
+normalize_status() {
+  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]'
+}
+
+parse_structured_summary() {
+  local raw="$1"
+  local line1 line2 line3 status_candidate
+
+  TITLE=""
+  TAGS_CSV=""
+  STATUS=""
+  SUMMARY_BODY=""
+
+  [ -n "$raw" ] || return 1
+
+  line1=$(printf '%s\n' "$raw" | sed -n '1p')
+  line2=$(printf '%s\n' "$raw" | sed -n '2p')
+  line3=$(printf '%s\n' "$raw" | sed -n '3p')
+
+  case "$line1" in
+    TITLE:*) TITLE=$(printf '%s' "$line1" | sed 's/^TITLE:[[:space:]]*//') ;;
+    *) return 1 ;;
+  esac
+
+  case "$line2" in
+    TAGS:*) TAGS_CSV=$(printf '%s' "$line2" | sed 's/^TAGS:[[:space:]]*//') ;;
+    *) return 1 ;;
+  esac
+
+  case "$line3" in
+    STATUS:*) status_candidate=$(printf '%s' "$line3" | sed 's/^STATUS:[[:space:]]*//') ;;
+    *) return 1 ;;
+  esac
+
+  STATUS=$(normalize_status "$status_candidate")
+  case "$STATUS" in
+    completed|in-progress|blocked) ;;
+    *) return 1 ;;
+  esac
+
+  SUMMARY_BODY=$(printf '%s\n' "$raw" | sed '1,3d')
+  [ -n "$TITLE" ] || return 1
+  [ -n "$TAGS_CSV" ] || return 1
+  [ -n "$SUMMARY_BODY" ] || return 1
+
+  return 0
+}
+
+is_generic_title() {
+  local lowered
+  lowered=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
+  lowered=$(printf '%s' "$lowered" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')
+
+  case "$lowered" in
+    ""|*" session"|"$PROJECT_DIR"*|"${PROJECT_SLUG} session"|*"progress on session work"|auto-save|auto-save\ summary|session\ summary) return 0 ;;
+    "~/"*"/ session"|"/"*"/ session") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+has_only_generic_tags() {
+  local tag lowered meaningful=0
+  while IFS= read -r tag; do
+    lowered=$(printf '%s' "$tag" | tr '[:upper:]' '[:lower:]' | sed 's/^ *//; s/ *$//')
+    case "$lowered" in
+      ""|auto-save|llm-history|session|session-context|session-preservation|workflow) ;;
+      *) meaningful=1 ;;
+    esac
+  done < <(printf '%s' "${1:-}" | tr ',' '\n')
+
+  [ "$meaningful" -eq 0 ]
+}
+
+summary_has_heading() {
+  printf '%s\n' "$SUMMARY_BODY" | grep -Fx "## $1" >/dev/null
+}
+
+summary_has_numbered_steps() {
+  awk '
+    /^## Concrete Next Steps$/ { in_section=1; next }
+    /^## / { in_section=0 }
+    in_section && /^[0-9]+\./ { found=1 }
+    END { exit(found ? 0 : 1) }
+  ' <<EOF
+$SUMMARY_BODY
+EOF
+}
+
+contains_forbidden_language() {
+  printf '%s\n' "$SUMMARY_BODY" | grep -Eiq \
+    "could you clarify|what would you like to work on|what would you like me to do|please let me know what you'd like"
+}
+
+summary_mentions_required_facts() {
+  local required_file required_check
+  required_file="${REQUIRED_FILE_MENTION:-}"
+  required_check="${REQUIRED_CHECK_MENTION:-}"
+
+  if [ -n "$required_file" ]; then
+    printf '%s\n' "$SUMMARY_BODY" | grep -F "$required_file" >/dev/null || return 1
+  fi
+
+  if [ -n "$required_check" ]; then
+    printf '%s\n' "$SUMMARY_BODY" | grep -F "$required_check" >/dev/null || return 1
+  fi
+
+  return 0
+}
+
+validate_structured_summary() {
+  local raw="$1"
+  local tag_count
+
+  VALIDATION_ERROR=""
+  parse_structured_summary "$raw" || {
+    VALIDATION_ERROR="missing required metadata"
+    return 1
+  }
+
+  TITLE=$(printf '%s' "$TITLE" | head -c 100)
+  tag_count=$(printf '%s' "$TAGS_CSV" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | awk 'END { print NR + 0 }')
+  if [ "$tag_count" -lt 3 ] || [ "$tag_count" -gt 5 ]; then
+    VALIDATION_ERROR="expected 3-5 tags"
+    return 1
+  fi
+
+  if is_generic_title "$TITLE"; then
+    VALIDATION_ERROR="generic title"
+    return 1
+  fi
+
+  if [ "$GROUNDED_TAGS_AVAILABLE" = "true" ] && has_only_generic_tags "$TAGS_CSV"; then
+    VALIDATION_ERROR="generic tags"
+    return 1
+  fi
+
+  for heading in "Executive Summary" "Working State" "Files Changed" "Concrete Next Steps"; do
+    if ! summary_has_heading "$heading"; then
+      VALIDATION_ERROR="missing heading: $heading"
+      return 1
+    fi
+  done
+
+  if ! summary_has_numbered_steps; then
+    VALIDATION_ERROR="missing numbered next steps"
+    return 1
+  fi
+
+  if contains_forbidden_language; then
+    VALIDATION_ERROR="forbidden conversational language"
+    return 1
+  fi
+
+  if ! summary_mentions_required_facts; then
+    VALIDATION_ERROR="missing grounded fact mention"
+    return 1
+  fi
+
+  return 0
+}
+
+build_prompt_payload() {
+  local session_facts repo_facts tool_facts derived_facts assistant_narrative
+
+  session_facts=$(printf '%s' "$CONTEXT_BUNDLE" | jq '{
+    session_id: .session.session_id,
+    session_name: .session.session_name,
+    trigger: .session.trigger,
+    project_dir: .session.project_dir,
+    project_slug: .session.project_slug,
+    last_user_ask: .session.last_user_ask,
+    recent_user_asks: .session.recent_user_asks,
+    assistant_milestones: .session.assistant_milestones
+  }')
+  repo_facts=$(printf '%s' "$CONTEXT_BUNDLE" | jq '.repo')
+  tool_facts=$(printf '%s' "$CONTEXT_BUNDLE" | jq '.tools')
+  derived_facts=$(printf '%s' "$CONTEXT_BUNDLE" | jq '{
+    grounded_tags: .derived.grounded_tags,
+    fallback_title: .derived.fallback_title,
+    fallback_status: .derived.fallback_status,
+    next_steps: .derived.next_steps
+  }')
+  assistant_narrative=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.session.assistant_narrative')
+
+  printf '%s\n\nRules for this invocation:\n- Output only the requested handoff document.\n- Do not ask questions.\n- Do not add any prose before the TITLE/TAGS/STATUS lines.\n- Use only facts present in the labeled sections below.\n- If a fact is missing, say `unknown` instead of guessing.\n- Never use a path-only title or a `<project> session` title.\n- For nontrivial sessions, include `## Executive Summary`, `## Working State`, `## Files Changed`, and `## Concrete Next Steps`.\n- Never fall back to generic-only tags when grounded facts are available.\n\nBEGIN SESSION FACTS\n%s\nEND SESSION FACTS\n\nBEGIN REPO FACTS\n%s\nEND REPO FACTS\n\nBEGIN TOOL FACTS\n%s\nEND TOOL FACTS\n\nBEGIN DERIVED FACTS\n%s\nEND DERIVED FACTS\n\nBEGIN ASSISTANT NARRATIVE\n%s\nEND ASSISTANT NARRATIVE\n' \
+    "$PROMPT_TEXT" \
+    "$session_facts" \
+    "$repo_facts" \
+    "$tool_facts" \
+    "$derived_facts" \
+    "$assistant_narrative"
+}
+
+build_fallback_summary() {
+  printf '%s' "$CONTEXT_BUNDLE" | jq -r --arg render_note "$FALLBACK_RENDER_NOTE" '
+    def paragraph(items): items | map(select(length > 0)) | join(" ");
+    def bullets(items): if (items | length) == 0 then "- unknown" else items | join("\n") end;
+    def numbered(items): if (items | length) == 0 then "1. Review the grounded session facts and continue from the latest recorded state." else items | to_entries | map("\(.key + 1). \(.value)") | join("\n") end;
+    "## Executive Summary\n\n"
+    + paragraph(.derived.summary_sentences)
+    + "\n\n## Working State\n\n"
+    + bullets(.derived.working_state_lines)
+    + "\n\n## Files Changed\n\n"
+    + bullets(.derived.files_changed_lines)
+    + "\n\n## Concrete Next Steps\n\n"
+    + numbered(.derived.next_steps)
+    + (if (.derived.failed_lines | length) > 0
+        then "\n\n## Failed Approaches\n\n" + bullets(.derived.failed_lines)
+        else ""
+       end)
+    + "\n\n## Warnings\n\n"
+    + bullets(
+        (.derived.warning_lines + [
+          $render_note
+        ])
+      )
+  '
+}
 
 # Trim log when > 200 lines
 if [ -f "$LOGFILE" ] && [ "$(wc -l < "$LOGFILE" | tr -d ' ')" -gt 200 ]; then
@@ -41,127 +266,110 @@ HOOK_INPUT_JSON=$(jq -r '.hook_input_json' "$WORK_FILE")
 
 log "START session=$SESSION_ID event=$HOOK_EVENT"
 
-# --- Generate summary via claude -p ---
+# --- Generate summary via claude -p or deterministic grounded render ---
 
 # Shorten home path for display
 PROJECT_DIR="${CWD/#\/Users\/naqi.khan/~}"
+PROJECT_SLUG=$(basename "$CWD" 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')
+[ -z "$PROJECT_SLUG" ] && PROJECT_SLUG="session"
+MODEL_LABEL="auto-saved (sonnet)"
+FALLBACK_RENDER_NOTE="- This handoff was rendered from grounded session facts after model output was rejected or unavailable."
 
-# Extract session name (Claude Code auto-assigns, e.g., "upgrade-llm-history-skill")
-SESSION_NAME=$(jq -r 'select(.type == "custom-title") | .customTitle' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
+# Build grounded context bundle from transcript + lightweight repo probing
+CONTEXT_BUNDLE=$(python3 "$CONTEXT_HELPER" "$WORK_FILE")
+SESSION_NAME=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.session.session_name // ""')
+GROUNDED_TAGS_AVAILABLE=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.grounded_tags_available')
+REQUIRED_FILE_MENTION=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.required_file_mentions[0] // ""')
+REQUIRED_CHECK_MENTION=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.required_check_mentions[0] // ""')
+FALLBACK_TITLE=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.fallback_title')
+FALLBACK_STATUS=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.fallback_status')
+FALLBACK_TAGS_CSV=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.grounded_tags | join(",")')
+SUMMARY=""
 
-# Extract only assistant text from transcript — assistant messages describe actual
-# work done. User messages contain mostly tool_results and skill injection text
-# which pollutes the summary.
-TRANSCRIPT_TEXT=$(jq -r '
-  select(.type == "assistant")
-  | .message.content[]?
-  | select(.type == "text")
-  | .text
-' "$TRANSCRIPT_PATH" 2>>"$LOGFILE" | tail -3000) || { log "WARN: jq failed extracting transcript text"; true; }
-
-# If no text content extracted, use last_assistant_message as fallback input
-if [ -z "$TRANSCRIPT_TEXT" ]; then
-  TRANSCRIPT_TEXT=$(echo "$HOOK_INPUT_JSON" | jq -r '.last_assistant_message // ""')
-fi
-
-# Load prompt from external file with inline fallback
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROMPT_FILE="$SCRIPT_DIR/../references/prompt.md"
-if [ -f "$PROMPT_FILE" ]; then
-  PROMPT_TEXT=$(cat "$PROMPT_FILE")
+if [ "$RENDER_MODE" = "session-end-sync" ]; then
+  MODEL_LABEL="auto-saved (grounded deterministic)"
+  FALLBACK_RENDER_NOTE="- This handoff was rendered directly from grounded session facts during SessionEnd to avoid nested Claude invocation."
+  log "INFO: render_mode=$RENDER_MODE session=$SESSION_ID skipping claude -p"
 else
-  log "WARN: prompt file missing ($PROMPT_FILE), using inline fallback"
-  PROMPT_TEXT="You are generating a session handoff document for Claude Code session resumption.
-Analyze this conversation and produce ONLY markdown body content (no YAML frontmatter).
+  # Load prompt from external file with inline fallback
+  PROMPT_FILE="$SCRIPT_DIR/../references/prompt.md"
+  if [ -f "$PROMPT_FILE" ]; then
+    PROMPT_TEXT=$(cat "$PROMPT_FILE")
+  else
+    log "WARN: prompt file missing ($PROMPT_FILE), using inline fallback"
+    PROMPT_TEXT="You are generating a session handoff document for Claude Code session resumption.
+Analyze the grounded session facts and produce ONLY markdown body content (no YAML frontmatter).
 
 FIRST LINE: TITLE: <descriptive 5-10 word title>
 SECOND LINE: TAGS: <3-5 comma-separated lowercase tags>
 THIRD LINE: STATUS: <completed|in-progress|blocked>
 
-Then sections: Executive Summary (what/accomplished/remains), Key Decisions (chosen vs rejected + why), Working State (exact codebase state right now), Files Changed (path + specific change), Concrete Next Steps (exact commands, not vague), Failed Approaches (what didn't work + why), Warnings.
-Write for a session that has NEVER seen this code. Every decision must include what was rejected. Every next step must include the exact command or file path. Under 300 lines."
-fi
-
-# Detect timeout command (GNU coreutils; not available on stock macOS)
-run_with_timeout() {
-  if command -v timeout &>/dev/null; then
-    timeout 90 "$@"
-  elif command -v gtimeout &>/dev/null; then
-    gtimeout 90 "$@"
-  else
-    "$@"
+Then sections: Executive Summary, Working State, Files Changed, Concrete Next Steps. Key Decisions, Failed Approaches, and Warnings are optional. Use only the provided facts; if a fact is missing, say unknown. Never ask clarifying questions. Under 300 lines."
   fi
-}
 
-# Call claude -p with timeout to prevent orphan workers on API failure
-SUMMARY=$(echo "$TRANSCRIPT_TEXT" | run_with_timeout claude -p \
-  --model sonnet \
-  --no-session-persistence \
-  --strict-mcp-config \
-  "$PROMPT_TEXT" 2>/dev/null) || true
+  PROMPT_PAYLOAD=$(build_prompt_payload)
+
+  # Detect timeout command (GNU coreutils; not available on stock macOS)
+  run_with_timeout() {
+    if command -v timeout &>/dev/null; then
+      timeout 90 "$@"
+    elif command -v gtimeout &>/dev/null; then
+      gtimeout 90 "$@"
+    else
+      "$@"
+    fi
+  }
+
+  # Call claude -p with timeout to prevent orphan workers on API failure
+  SUMMARY=$(printf '%s' "$PROMPT_PAYLOAD" | run_with_timeout "$CLAUDE_BIN" -p \
+    --model sonnet \
+    --no-session-persistence \
+    --disable-slash-commands \
+    --strict-mcp-config \
+    --tools "" 2>/dev/null) || true
+fi
 
 # --- Parse structured metadata from claude -p response ---
 
 TITLE=""
 TAGS_CSV=""
 STATUS=""
+SUMMARY_BODY=""
 
 if [ -n "$SUMMARY" ]; then
-  TITLE=$(echo "$SUMMARY" | grep -m1 '^TITLE:' | sed 's/^TITLE: *//' | head -c 100) || true
-  TAGS_CSV=$(echo "$SUMMARY" | grep -m1 '^TAGS:' | sed 's/^TAGS: *//') || true
-  STATUS=$(echo "$SUMMARY" | grep -m1 '^STATUS:' | sed 's/^STATUS: *//' | tr '[:upper:]' '[:lower:]') || true
-
-  # Strip metadata lines from body (portable — BSD sed doesn't support {cmd;cmd} grouping)
-  SUMMARY=$(echo "$SUMMARY" | sed '/^TITLE:/d; /^TAGS:/d; /^STATUS:/d')
+  if validate_structured_summary "$SUMMARY"; then
+    SUMMARY="$SUMMARY_BODY"
+  else
+    SUMMARY_PREVIEW=$(printf '%s\n' "$SUMMARY" | sed -n '1,3p' | tr '\n' '|' | cut -c1-200)
+    log "WARN: invalid structured output from claude -p (${VALIDATION_ERROR:-unknown}; preview=${SUMMARY_PREVIEW:-empty})"
+    SUMMARY=""
+  fi
 fi
 
 # --- Fallback if claude -p failed or timed out ---
 
 if [ -z "$SUMMARY" ]; then
-  log "WARN: claude -p failed, building structured fallback"
-
-  # Last assistant text blocks (the actual work descriptions)
-  RECENT_CONTEXT=$(jq -r '
-    select(.type == "assistant")
-    | .message.content[]?
-    | select(.type == "text")
-    | .text
-  ' "$TRANSCRIPT_PATH" 2>>"$LOGFILE" | tail -80) || true
-
-  LAST_MSG=$(echo "$HOOK_INPUT_JSON" | jq -r '.last_assistant_message // ""')
-  [ -z "$LAST_MSG" ] && LAST_MSG="(Session context unavailable — triggered via $HOOK_EVENT)"
-
-  SUMMARY="## Executive Summary
-
-Auto-save triggered ($HOOK_EVENT) for project \`${PROJECT_DIR}\`. LLM summarization was unavailable; this is a structured extraction from the transcript.
-
-## Recent Work Context
-
-${RECENT_CONTEXT:-No assistant text extracted.}
-
-## Last Assistant Message
-
-$LAST_MSG
-
-## Next Steps
-
-1. Review this file and re-run \`/llm-history\` manually for a richer summary."
-
-  TITLE="${PROJECT_DIR} — auto-save ($HOOK_EVENT)"
-  STATUS="unknown"
+  if [ "$RENDER_MODE" = "session-end-sync" ]; then
+    log "INFO: building deterministic grounded SessionEnd handoff"
+  else
+    log "WARN: building deterministic fallback from grounded session facts"
+  fi
+  SUMMARY=$(build_fallback_summary)
+  TITLE="$FALLBACK_TITLE"
+  STATUS="$FALLBACK_STATUS"
+  TAGS_CSV="$FALLBACK_TAGS_CSV"
 fi
 
 # --- Validate and default metadata ---
 
-case "$STATUS" in completed|in-progress|blocked) ;; *) STATUS="unknown" ;; esac
-[ -z "$TITLE" ] && TITLE="${PROJECT_DIR} session"
+case "$STATUS" in completed|in-progress|blocked) ;; *) STATUS="in-progress" ;; esac
+[ -z "$TITLE" ] && TITLE="$FALLBACK_TITLE"
 
 # Convert tags CSV to YAML list
 if [ -n "$TAGS_CSV" ]; then
   TAGS_YAML=$(echo "$TAGS_CSV" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sed 's/^/  - /')
 else
-  TAGS_YAML="  - llm-history
-  - auto-save"
+  TAGS_YAML=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.grounded_tags | map("  - " + .) | join("\n")')
 fi
 
 # YAML-safe title: single-quote with '' escaping for embedded single quotes
@@ -175,7 +383,7 @@ cat > "$FILE_PATH" << FRONTMATTER_EOF
 date: ${DATE_ISO}
 saved_at: ${SAVED_AT}
 title: '${TITLE_YAML}'
-model: auto-saved (sonnet)
+model: ${MODEL_LABEL}
 project: ${PROJECT_DIR}
 session_id: ${SESSION_ID}
 session_name: ${SESSION_NAME}

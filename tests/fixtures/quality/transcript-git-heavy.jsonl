@@ -1,0 +1,9 @@
+{"type":"custom-title","customTitle":"git-heavy-session"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Audit the exit pipeline and make sure git results are visible."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I am instrumenting the exit flow so git, history, and overall results are all logged explicitly."}]}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-git-status","name":"Bash","input":{"command":"git status --short"}}]}}}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-git-gitleaks","name":"Bash","input":{"command":"gitleaks detect --no-banner -q"}}]}}}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-git-push","name":"Bash","input":{"command":"git push origin main"}}]}}}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-git-edit","name":"Edit","input":{"file_path":"__PROJECT_ROOT__/scripts/exit-audit.sh","old_string":"old","new_string":"new"}}]}}}}
+{"type":"file-history-snapshot","messageId":"snap-git","snapshot":{"messageId":"snap-git","trackedFileBackups":{"__PROJECT_ROOT__/scripts/exit-audit.sh":{"backupFileName":null,"version":1,"backupTime":"2026-03-20T19:20:00Z"}},"timestamp":"2026-03-20T19:20:01Z"},"isSnapshotUpdate":true}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The remaining work is verifying the exit log output in a temp repo after the git checks pass."}]}}

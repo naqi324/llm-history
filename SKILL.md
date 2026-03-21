@@ -47,6 +47,12 @@ Analyze the full conversation to extract the following. Write for a Claude Code 
 - **Failed approaches**: What was tried and didn't work, with the specific error or reason. Prevents retrying dead ends.
 - **Warnings**: Environment requirements, known bugs, fragile assumptions, or platform-specific gotchas.
 
+Ground the note in concrete facts whenever possible:
+- repo state (`git status --short`, branch, recent commits)
+- exact files touched
+- exact commands/checks that were run
+- explicit unknowns instead of guesses
+
 ### Step 3: Retrieve Session ID
 
 Run the following Bash command to get the current session ID:
@@ -121,6 +127,8 @@ Key guidance:
 - The H1 title should be a descriptive 5-10 word phrase about what was accomplished, NOT the filename.
 - Derive 3-5 tags from session content — never use generic "llm-history" or "auto-save" for manual saves.
 - The `status` field should reflect whether the work is completed, in-progress, or blocked.
+- Always include `## Executive Summary`, `## Working State`, `## Files Changed`, and `## Concrete Next Steps` for any nontrivial save.
+- Never ask clarifying questions or write conversational filler in the saved handoff.
 - Use single quotes around the `title` value in YAML frontmatter to handle special characters.
 
 ### Step 6: Confirm

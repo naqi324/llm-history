@@ -1,0 +1,11 @@
+{"type":"custom-title","customTitle":"grounded-code-session"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Please make llm-history auto-saves much more useful."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I am grounding the worker in repo and transcript facts before rewriting the prompt and fallback."}]}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-code-read","name":"Read","input":{"file_path":"__PROJECT_ROOT__/scripts/llm-history-worker.sh"}}]}}}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-code-edit","name":"Edit","input":{"file_path":"__PROJECT_ROOT__/scripts/llm-history-worker.sh","old_string":"old","new_string":"new"}}]}}}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-code-prompt","name":"Edit","input":{"file_path":"__PROJECT_ROOT__/references/prompt.md","old_string":"old","new_string":"new"}}]}}}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-code-check","name":"Bash","input":{"command":"bash -n scripts/llm-history-worker.sh"}}]}}}}
+{"type":"progress","data":{"message":{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-code-smoke","name":"Bash","input":{"command":"tests/smoke.sh"}}]}}}}
+{"type":"file-history-snapshot","messageId":"snap-code","snapshot":{"messageId":"snap-code","trackedFileBackups":{"__PROJECT_ROOT__/scripts/llm-history-worker.sh":{"backupFileName":null,"version":1,"backupTime":"2026-03-20T19:00:00Z"},"__PROJECT_ROOT__/references/prompt.md":{"backupFileName":null,"version":1,"backupTime":"2026-03-20T19:00:01Z"}},"timestamp":"2026-03-20T19:00:02Z"},"isSnapshotUpdate":true}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Added grounded context extraction plus stricter quality validation for model output."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Next step is building a resume-readiness evaluator and updating the smoke harness."}]}}

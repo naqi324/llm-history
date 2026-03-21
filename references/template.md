@@ -8,14 +8,14 @@ Reference documentation for the markdown files produced by the llm-history skill
 |----------------|--------|----------|--------------------------------------------------|
 | date           | date   | yes      | Session date (YYYY-MM-DD)                        |
 | saved_at       | string | yes      | ISO 8601 timestamp with timezone when saved       |
-| title          | string | yes      | Descriptive session title from claude -p          |
-| model          | string | yes      | Model used (e.g., "Claude Opus 4.6")             |
+| title          | string | yes      | Descriptive session title from grounded facts or model output |
+| model          | string | yes      | Renderer used for the save (model-backed or deterministic) |
 | project        | string | yes      | Project directory path (~ for home)              |
 | session_id     | string | no       | Claude Code session identifier                   |
 | session_name   | string | no       | Claude Code auto-assigned session name            |
 | context_usage  | string | no       | Approximate context window usage (manual only)   |
-| status         | string | yes      | completed, in-progress, blocked, or unknown      |
-| trigger        | string | yes      | What triggered the save: manual, Stop, PreCompact|
+| status         | string | yes      | completed, in-progress, or blocked               |
+| trigger        | string | yes      | What triggered the save: manual, Stop, PreCompact, or SessionEnd |
 | tags           | list   | yes      | 3-5 tags derived from session content            |
 
 ## Body Sections
@@ -26,20 +26,31 @@ Reference documentation for the markdown files produced by the llm-history skill
 ### 2. Key Decisions
 Bulleted list of significant decisions with rationale. Omit if no meaningful decisions were made.
 
-### 3. In-Progress Work
-Current state of incomplete work with enough detail to resume without re-reading source files. Include branch names, partial implementations, or pending changes. Omit if everything was completed.
+### 3. Working State
+Exact current state grounded in transcript and repo facts: branch, cleanliness, checks run, what's done, what's partial, and what remains.
 
-### 4. Relevant Files
-Bulleted list of file paths that were created, modified, or are central to the work. Each with a brief description of what was done.
+### 4. Files Changed
+Bulleted list of concrete file paths touched in the session facts, each with what happened and why it matters.
 
-#### Key Code Context (subsection)
-Essential code snippets in fenced blocks. Only include when the snippet is critical for resumption. Omit entirely when not needed.
+### 5. Concrete Next Steps
+Numbered list of specific, actionable items with exact commands, file paths, or checks. Always present.
 
-### 5. Next Steps
-Numbered list of specific, actionable items in priority order. Always present.
+### 6. Key Decisions / Failed Approaches / Warnings
+Optional sections included only when the grounded facts support them.
 
-### 6. Warnings and Blockers
-Caveats, failed approaches, environment requirements, or blockers. Omit if none.
+## Worker Validation and Fallback
+
+- Structured Claude output must begin with `TITLE:`, `TAGS:`, and `STATUS:` on the first three lines.
+- Accepted `status` values are `completed`, `in-progress`, or `blocked`.
+- Model output is also rejected when it is low-value, including:
+  - generic/path-only titles
+  - generic-only tags when grounded facts exist
+  - missing `Executive Summary`, `Working State`, `Files Changed`, or `Concrete Next Steps`
+  - missing numbered next steps
+  - clarifying-question style prose
+  - omission of grounded file/command facts that the worker marked as required
+- `SessionEnd` saves are always rendered deterministically from the grounded context bundle so shutdown never depends on a nested Claude subprocess.
+- If the Claude subprocess returns malformed or low-value output in non-exit flows, the worker falls back to a deterministic grounded handoff built from the same context bundle.
 
 ## File Naming Convention
 
