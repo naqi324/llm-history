@@ -62,10 +62,13 @@ if [ "$TRANSCRIPT_LINES" -lt 10 ]; then
   exit 0
 fi
 
-# Guard 5: Session deduplication — allow re-save if transcript has grown significantly
-# Resumed sessions keep the same session_id but accumulate new work. The lock file
-# stores the transcript line count from the last save. If the transcript has grown
-# by 50+ lines, allow a new save (the filename dedup counter handles -2, -3 suffixes).
+# Guard 5: Unified session deduplication
+# Handles three cases:
+# (a) First save for this session → proceed
+# (b) Resumed session with significant new work (50+ JSONL lines growth) → re-save with -2 suffix
+# (c) Same session, no meaningful growth → skip
+# The vault grep only runs once per session (when no lock file exists yet).
+# After that, the lock file tracks the baseline for growth-based re-save decisions.
 mkdir -p "$LOCKDIR"
 LOCK_FILE=""
 if [ -n "$SESSION_ID" ]; then
@@ -75,19 +78,18 @@ if [ -n "$SESSION_ID" ]; then
     if [ -n "$PREV_LINES" ] && [ "$TRANSCRIPT_LINES" -gt "$((PREV_LINES + 50))" ]; then
       log "RESAVE: transcript grew from $PREV_LINES to $TRANSCRIPT_LINES lines session=$SESSION_ID"
     else
-      log "SKIP: already saved (prev=${PREV_LINES:-0} now=$TRANSCRIPT_LINES) session=$SESSION_ID"
+      log "SKIP: no significant growth (prev=${PREV_LINES:-0} now=$TRANSCRIPT_LINES) session=$SESSION_ID"
       exit 0
     fi
-  fi
-fi
-
-# Guard 6: Skip if this session already has a saved file (manual /llm-history or prior hook)
-if [ -n "$SESSION_ID" ]; then
-  EXISTING=$(grep -rl "session_id: ${SESSION_ID}" "$VAULT_DIR" 2>/dev/null | head -1) || true
-  if [ -n "$EXISTING" ]; then
-    log "SKIP: Guard 6 existing=$EXISTING session=$SESSION_ID"
-    [ -n "$LOCK_FILE" ] && echo "$TRANSCRIPT_LINES" > "$LOCK_FILE"
-    exit 0
+  else
+    # No lock file — check if vault already has this session (e.g., from manual /llm-history or post-reboot)
+    EXISTING=$(grep -rl "session_id: ${SESSION_ID}" "$VAULT_DIR" 2>/dev/null | head -1) || true
+    if [ -n "$EXISTING" ]; then
+      log "SKIP: vault has existing file (no lock), setting lock session=$SESSION_ID"
+      echo "$TRANSCRIPT_LINES" > "$LOCK_FILE"
+      exit 0
+    fi
+    log "ALLOW: first save session=$SESSION_ID"
   fi
 fi
 
@@ -106,9 +108,6 @@ SLUG=$(basename "$CWD" 2>/dev/null \
   | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//' \
   | cut -c1-25)
 [ -z "$SLUG" ] && SLUG="session"
-
-# Keep FIRST_PROMPT for backward compat with current worker (removed in v2 worker)
-FIRST_PROMPT="(project: $SLUG)"
 
 # Deduplication: find next available filename
 BASE_NAME="${DATE_YYMMDD}-${SLUG}"
@@ -139,17 +138,15 @@ jq -n \
   --arg cwd "$CWD" \
   --arg hook_event "$HOOK_EVENT" \
   --arg session_id "$SESSION_ID" \
-  --arg first_prompt "$FIRST_PROMPT" \
-  --arg slug "$SLUG" \
   --arg file_path "$FILE_PATH" \
   --arg base_name "$BASE_NAME" \
   --arg date_iso "$DATE_ISO" \
   --arg saved_at "$SAVED_AT" \
   --arg hook_input_json "$INPUT" \
   '{transcript_path: $transcript_path, cwd: $cwd, hook_event: $hook_event,
-    session_id: $session_id, first_prompt: $first_prompt, slug: $slug,
-    file_path: $file_path, base_name: $base_name, date_iso: $date_iso,
-    saved_at: $saved_at, hook_input_json: $hook_input_json}' > "$WORK_FILE"
+    session_id: $session_id, file_path: $file_path, base_name: $base_name,
+    date_iso: $date_iso, saved_at: $saved_at,
+    hook_input_json: $hook_input_json}' > "$WORK_FILE"
 
 # Launch detached worker — survives parent exit/SIGHUP
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
