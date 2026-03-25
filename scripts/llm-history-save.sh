@@ -111,12 +111,14 @@ fi
 INPUT=$(cat)
 log "START input_length=${#INPUT}"
 
-# Parse fields from hook JSON
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""')
-TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
-CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
-HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // ""')
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+# Parse fields from hook JSON (single jq call)
+eval "$(echo "$INPUT" | jq -r '
+  "SESSION_ID=" + ((.session_id // "") | @sh),
+  "TRANSCRIPT_PATH=" + ((.transcript_path // "") | @sh),
+  "CWD=" + ((.cwd // "") | @sh),
+  "HOOK_EVENT=" + ((.hook_event_name // "") | @sh),
+  "STOP_HOOK_ACTIVE=" + ((.stop_hook_active // false | tostring) | @sh),
+  "TRIGGER=" + ((.trigger // "") | @sh)')"
 
 # --- Guards ---
 
@@ -128,7 +130,6 @@ fi
 
 # Guard 2: For PreCompact, only trigger on automatic compaction (not manual /compact)
 if [ "$HOOK_EVENT" = "PreCompact" ]; then
-  TRIGGER=$(echo "$INPUT" | jq -r '.trigger // ""')
   if [ "$TRIGGER" != "auto" ]; then
     log "SKIP: PreCompact manual trigger session=$SESSION_ID"
     finish "skip-precompact-manual" "" "" 0
@@ -284,6 +285,3 @@ else
   cleanup_stale_artifacts
   finish "success-dispatched" "async" "$FILE_PATH" 0
 fi
-
-# Clean up old lock files (older than 2 days)
-find "$LOCKDIR" -name "*.saved" -mtime +2 -delete 2>/dev/null || true

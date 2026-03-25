@@ -9,37 +9,10 @@ CHECKER_SCRIPT="$ROOT_DIR/tests/check_resume_readiness.py"
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 REPORT_DIR="$ROOT_DIR/tests/logs"
 TODAY_YYMMDD=$(date +%y%m%d)
-TEST_DIRS=()
 SCENARIO_REPORTS=()
 
-cleanup() {
-  local dir
-  for dir in "${TEST_DIRS[@]:-}"; do
-    rm -rf "$dir"
-  done
-}
-trap cleanup EXIT
-
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
-
-assert_file_exists() {
-  [ -f "$1" ] || fail "expected file to exist: $1"
-}
-
-assert_contains() {
-  local path="$1"
-  local needle="$2"
-  grep -F "$needle" "$path" >/dev/null || fail "expected '$needle' in $path"
-}
-
-assert_jq() {
-  local filter="$1"
-  local path="$2"
-  jq -e "$filter" "$path" >/dev/null || fail "jq assertion failed: $filter on $path"
-}
+# shellcheck source=tests/helpers.sh
+source "$ROOT_DIR/tests/helpers.sh"
 
 setup_env() {
   local name="$1"

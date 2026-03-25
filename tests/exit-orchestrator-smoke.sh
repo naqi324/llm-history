@@ -8,43 +8,12 @@ AUDIT_SCRIPT="$ROOT_DIR/scripts/exit-audit.sh"
 REAL_GIT_SCRIPT="/Users/naqi.khan/git/CLAUDE-md/.claude/hooks/auto-git-commit.sh"
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 TODAY_YYMMDD=$(date +%y%m%d)
-TEST_DIRS=()
 
-cleanup() {
-  local dir
-  for dir in "${TEST_DIRS[@]:-}"; do
-    rm -rf "$dir"
-  done
-}
-trap cleanup EXIT
-
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
-
-assert_file_missing() {
-  [ ! -e "$1" ] || fail "expected file to be absent: $1"
-}
-
-assert_file_exists() {
-  [ -f "$1" ] || fail "expected file to exist: $1"
-}
-
-assert_contains() {
-  local path="$1"
-  local needle="$2"
-  grep -F "$needle" "$path" >/dev/null || fail "expected '$needle' in $path"
-}
-
-assert_jq() {
-  local filter="$1"
-  local path="$2"
-  jq -e "$filter" "$path" >/dev/null || fail "jq assertion failed: $filter on $path"
-}
+# shellcheck source=tests/helpers.sh
+source "$ROOT_DIR/tests/helpers.sh"
 
 assert_claude_not_called() {
-  assert_file_missing "$TEST_ROOT/logs/claude-invoked.log"
+  assert_not_exists "$TEST_ROOT/logs/claude-invoked.log"
 }
 
 assert_nontrivial_history_output() {
@@ -112,11 +81,6 @@ build_hook_input() {
       stop_hook_active: false,
       last_assistant_message: "Exit orchestrator smoke test."
     }'
-}
-
-copy_transcript_fixture() {
-  local target="$1"
-  cp "$FIXTURES_DIR/transcript-base.jsonl" "$target"
 }
 
 write_trivial_transcript() {

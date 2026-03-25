@@ -10,34 +10,9 @@ GOLDEN_DIR="$ROOT_DIR/tests/golden"
 FIXED_CWD="/Users/naqi.khan/git/skills/llm-history"
 TODAY_YYMMDD=$(date +%y%m%d)
 TODAY_ISO=$(date +%Y-%m-%d)
-TEST_DIRS=()
 
-cleanup() {
-  local dir
-  for dir in "${TEST_DIRS[@]:-}"; do
-    rm -rf "$dir"
-  done
-}
-trap cleanup EXIT
-
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
-
-assert_file_exists() {
-  [ -f "$1" ] || fail "expected file to exist: $1"
-}
-
-assert_not_exists() {
-  [ ! -e "$1" ] || fail "expected path to be absent: $1"
-}
-
-assert_contains() {
-  local path="$1"
-  local needle="$2"
-  grep -F "$needle" "$path" >/dev/null || fail "expected '$needle' in $path"
-}
+# shellcheck source=tests/helpers.sh
+source "$ROOT_DIR/tests/helpers.sh"
 
 wait_for_file() {
   local path="$1"
@@ -81,11 +56,6 @@ PY
   export LLM_HISTORY_WORKER_LOGFILE="$TEST_ROOT/worker.log"
   export LLM_HISTORY_CLAUDE_BIN="$FIXTURES_DIR/stub-claude.sh"
   export LLM_HISTORY_TEST_CAPTURE_STDIN="$TEST_ROOT/claude-stdin.txt"
-}
-
-copy_transcript_fixture() {
-  local target="$1"
-  cp "$FIXTURES_DIR/transcript-base.jsonl" "$target"
 }
 
 append_assistant_lines() {

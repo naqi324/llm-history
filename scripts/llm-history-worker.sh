@@ -2,7 +2,6 @@
 # llm-history-worker.sh — Detached worker that generates and saves LLM history
 # Launched by llm-history-save.sh via nohup; survives parent exit/SIGHUP.
 # Reads all input from a temp work file (JSON) passed as $1.
-# v2: assistant-only extraction, structured metadata parsing, YAML-safe output.
 
 set -euo pipefail
 # NOTE: pipefail means ALL command substitutions with jq/grep pipelines
@@ -16,12 +15,13 @@ LOGFILE="${LLM_HISTORY_WORKER_LOGFILE:-/tmp/llm-history-worker.log}"
 CLAUDE_BIN="${LLM_HISTORY_CLAUDE_BIN:-claude}"
 WORK_FILE="${1:?Usage: llm-history-worker.sh <work-file>}"
 CONTEXT_HELPER="${LLM_HISTORY_CONTEXT_HELPER:-$SCRIPT_DIR/llm-history-context.py}"
+CONTEXT_FILE=""
 RENDER_MODE="${LLM_HISTORY_RENDER_MODE:-standard}"
 
 mkdir -p "$(dirname "$LOGFILE")"
 
 log() { echo "[$(date -Iseconds)] $*" >> "$LOGFILE" 2>/dev/null; }
-cleanup() { rm -f "$WORK_FILE" 2>/dev/null; }
+cleanup() { rm -f "$WORK_FILE" "${CONTEXT_FILE:-}" 2>/dev/null; }
 trap cleanup EXIT
 trap 'log "ERROR: session=${SESSION_ID:-unknown} line=$LINENO"; exit 1' ERR
 
@@ -115,7 +115,7 @@ EOF
 
 contains_forbidden_language() {
   printf '%s\n' "$SUMMARY_BODY" | grep -Eiq \
-    "could you clarify|what would you like to work on|what would you like me to do|please let me know what you'd like"
+    "could you clarify|what would you like to work on|what would you like me to do|please let me know what you'd like|tell me what you want to work on"
 }
 
 summary_mentions_required_facts() {
@@ -156,7 +156,7 @@ validate_structured_summary() {
     return 1
   fi
 
-  if [ "$GROUNDED_TAGS_AVAILABLE" = "true" ] && has_only_generic_tags "$TAGS_CSV"; then
+  if has_only_generic_tags "$TAGS_CSV"; then
     VALIDATION_ERROR="generic tags"
     return 1
   fi
@@ -189,7 +189,7 @@ validate_structured_summary() {
 build_prompt_payload() {
   local session_facts repo_facts tool_facts derived_facts assistant_narrative
 
-  session_facts=$(printf '%s' "$CONTEXT_BUNDLE" | jq '{
+  session_facts=$(jq '{
     session_id: .session.session_id,
     session_name: .session.session_name,
     trigger: .session.trigger,
@@ -198,16 +198,16 @@ build_prompt_payload() {
     last_user_ask: .session.last_user_ask,
     recent_user_asks: .session.recent_user_asks,
     assistant_milestones: .session.assistant_milestones
-  }')
-  repo_facts=$(printf '%s' "$CONTEXT_BUNDLE" | jq '.repo')
-  tool_facts=$(printf '%s' "$CONTEXT_BUNDLE" | jq '.tools')
-  derived_facts=$(printf '%s' "$CONTEXT_BUNDLE" | jq '{
+  }' "$CONTEXT_FILE")
+  repo_facts=$(jq '.repo' "$CONTEXT_FILE")
+  tool_facts=$(jq '.tools' "$CONTEXT_FILE")
+  derived_facts=$(jq '{
     grounded_tags: .derived.grounded_tags,
     fallback_title: .derived.fallback_title,
     fallback_status: .derived.fallback_status,
     next_steps: .derived.next_steps
-  }')
-  assistant_narrative=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.session.assistant_narrative')
+  }' "$CONTEXT_FILE")
+  assistant_narrative=$(jq -r '.session.assistant_narrative' "$CONTEXT_FILE")
 
   printf '%s\n\nRules for this invocation:\n- Output only the requested handoff document.\n- Do not ask questions.\n- Do not add any prose before the TITLE/TAGS/STATUS lines.\n- Use only facts present in the labeled sections below.\n- If a fact is missing, say `unknown` instead of guessing.\n- Never use a path-only title or a `<project> session` title.\n- For nontrivial sessions, include `## Executive Summary`, `## Working State`, `## Files Changed`, and `## Concrete Next Steps`.\n- Never fall back to generic-only tags when grounded facts are available.\n\nBEGIN SESSION FACTS\n%s\nEND SESSION FACTS\n\nBEGIN REPO FACTS\n%s\nEND REPO FACTS\n\nBEGIN TOOL FACTS\n%s\nEND TOOL FACTS\n\nBEGIN DERIVED FACTS\n%s\nEND DERIVED FACTS\n\nBEGIN ASSISTANT NARRATIVE\n%s\nEND ASSISTANT NARRATIVE\n' \
     "$PROMPT_TEXT" \
@@ -219,7 +219,7 @@ build_prompt_payload() {
 }
 
 build_fallback_summary() {
-  printf '%s' "$CONTEXT_BUNDLE" | jq -r --arg render_note "$FALLBACK_RENDER_NOTE" '
+  jq -r --arg render_note "$FALLBACK_RENDER_NOTE" '
     def paragraph(items): items | map(select(length > 0)) | join(" ");
     def bullets(items): if (items | length) == 0 then "- unknown" else items | join("\n") end;
     def numbered(items): if (items | length) == 0 then "1. Review the grounded session facts and continue from the latest recorded state." else items | to_entries | map("\(.key + 1). \(.value)") | join("\n") end;
@@ -241,7 +241,7 @@ build_fallback_summary() {
           $render_note
         ])
       )
-  '
+  ' "$CONTEXT_FILE"
 }
 
 # Trim log when > 200 lines
@@ -251,15 +251,16 @@ fi
 
 # --- Parse work file ---
 
-TRANSCRIPT_PATH=$(jq -r '.transcript_path' "$WORK_FILE")
-CWD=$(jq -r '.cwd' "$WORK_FILE")
-HOOK_EVENT=$(jq -r '.hook_event' "$WORK_FILE")
-SESSION_ID=$(jq -r '.session_id' "$WORK_FILE")
-FILE_PATH=$(jq -r '.file_path' "$WORK_FILE")
-BASE_NAME=$(jq -r '.base_name' "$WORK_FILE")
-DATE_ISO=$(jq -r '.date_iso' "$WORK_FILE")
-SAVED_AT=$(jq -r '.saved_at // ""' "$WORK_FILE")
-HOOK_INPUT_JSON=$(jq -r '.hook_input_json' "$WORK_FILE")
+eval "$(jq -r '
+  "TRANSCRIPT_PATH=" + (.transcript_path | @sh),
+  "CWD=" + (.cwd | @sh),
+  "HOOK_EVENT=" + (.hook_event | @sh),
+  "SESSION_ID=" + (.session_id | @sh),
+  "FILE_PATH=" + (.file_path | @sh),
+  "BASE_NAME=" + (.base_name | @sh),
+  "DATE_ISO=" + (.date_iso | @sh),
+  "SAVED_AT=" + ((.saved_at // "") | @sh),
+  "HOOK_INPUT_JSON=" + (.hook_input_json | @sh)' "$WORK_FILE")"
 
 # Fallback if saved_at missing (backward compat with pre-v2 dispatcher)
 [ -z "$SAVED_AT" ] && SAVED_AT=$(date -Iseconds)
@@ -270,20 +271,22 @@ log "START session=$SESSION_ID event=$HOOK_EVENT"
 
 # Shorten home path for display
 PROJECT_DIR="${CWD/#\/Users\/naqi.khan/~}"
-PROJECT_SLUG=$(basename "$CWD" 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')
-[ -z "$PROJECT_SLUG" ] && PROJECT_SLUG="session"
 MODEL_LABEL="auto-saved (sonnet)"
 FALLBACK_RENDER_NOTE="- This handoff was rendered from grounded session facts after model output was rejected or unavailable."
 
 # Build grounded context bundle from transcript + lightweight repo probing
-CONTEXT_BUNDLE=$(python3 "$CONTEXT_HELPER" "$WORK_FILE")
-SESSION_NAME=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.session.session_name // ""')
-GROUNDED_TAGS_AVAILABLE=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.grounded_tags_available')
-REQUIRED_FILE_MENTION=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.required_file_mentions[0] // ""')
-REQUIRED_CHECK_MENTION=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.required_check_mentions[0] // ""')
-FALLBACK_TITLE=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.fallback_title')
-FALLBACK_STATUS=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.fallback_status')
-FALLBACK_TAGS_CSV=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.grounded_tags | join(",")')
+CONTEXT_FILE=$(mktemp /tmp/llm-history-context-XXXXXX)
+python3 "$CONTEXT_HELPER" "$WORK_FILE" > "$CONTEXT_FILE"
+
+# Extract scalar fields in a single jq call
+eval "$(jq -r '
+  "SESSION_NAME=" + ((.session.session_name // "") | @sh),
+  "PROJECT_SLUG=" + (.session.project_slug | @sh),
+  "REQUIRED_FILE_MENTION=" + ((.derived.required_file_mentions[0] // "") | @sh),
+  "REQUIRED_CHECK_MENTION=" + ((.derived.required_check_mentions[0] // "") | @sh),
+  "FALLBACK_TITLE=" + (.derived.fallback_title | @sh),
+  "FALLBACK_STATUS=" + (.derived.fallback_status | @sh),
+  "FALLBACK_TAGS_CSV=" + ((.derived.grounded_tags | join(",")) | @sh)' "$CONTEXT_FILE")"
 SUMMARY=""
 
 if [ "$RENDER_MODE" = "session-end-sync" ]; then
@@ -369,7 +372,7 @@ case "$STATUS" in completed|in-progress|blocked) ;; *) STATUS="in-progress" ;; e
 if [ -n "$TAGS_CSV" ]; then
   TAGS_YAML=$(echo "$TAGS_CSV" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sed 's/^/  - /')
 else
-  TAGS_YAML=$(printf '%s' "$CONTEXT_BUNDLE" | jq -r '.derived.grounded_tags | map("  - " + .) | join("\n")')
+  TAGS_YAML=$(jq -r '.derived.grounded_tags | map("  - " + .) | join("\n")' "$CONTEXT_FILE")
 fi
 
 # YAML-safe title: single-quote with '' escaping for embedded single quotes

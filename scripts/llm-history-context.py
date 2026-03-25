@@ -312,7 +312,7 @@ def derive_tags(project_slug: str, touched_files: list[str], bash_commands: list
     return cleaned[:5]
 
 
-def derive_status(repo: dict[str, Any], failures: list[str], assistant_texts: list[str], touched_files: list[str]) -> str:
+def derive_status(repo: dict[str, Any], failures: list[str], assistant_texts: list[str]) -> str:
     combined = " ".join(text.lower() for text in assistant_texts[-6:])
     if failures and any(token in combined for token in ("blocked", "stuck", "unable", "can't", "cannot")):
         return "blocked"
@@ -525,7 +525,7 @@ def main() -> int:
     assistant_milestones = assistant_texts[-8:]
     recent_user_asks = user_texts[-6:]
     last_user_ask = recent_user_asks[-1] if recent_user_asks else normalize_text(hook_input.get("last_assistant_message"))
-    fallback_status = derive_status(repo, failures, assistant_texts, touched_files)
+    fallback_status = derive_status(repo, failures, assistant_texts)
     grounded_tags = derive_tags(project_slug, touched_files, bash_commands, repo)
     fallback_title = derive_title(project_slug, recent_user_asks, assistant_milestones)
     repo_root = repo.get("repo_root") or ""
@@ -560,7 +560,6 @@ def main() -> int:
         },
         "derived": {
             "grounded_tags": grounded_tags,
-            "grounded_tags_available": bool(grounded_tags),
             "fallback_title": fallback_title,
             "fallback_status": fallback_status,
             "summary_sentences": [
@@ -572,9 +571,9 @@ def main() -> int:
             "files_changed_lines": build_file_lines(repo_root, read_files, edit_files + write_files, snapshot_files),
             "next_steps": build_next_steps(repo, display_touched, checks, failures, project_dir),
             "failed_lines": [f"- {line}" for line in failures[:4]],
-            "warning_lines": [
-                f"- Repo probe warning: {repo['probe_error']}" for _ in [0] if repo.get("probe_error")
-            ]
+            "warning_lines": (
+                [f"- Repo probe warning: {repo['probe_error']}"] if repo.get("probe_error") else []
+            )
             + (
                 ["- No file-history snapshot was available; file paths come from tool calls only."]
                 if not snapshot_files

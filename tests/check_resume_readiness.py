@@ -20,6 +20,7 @@ FORBIDDEN_PATTERNS = (
     "what would you like to work on",
     "what would you like me to do",
     "tell me what you want to work on",
+    "please let me know what you'd like",
 )
 
 
@@ -72,6 +73,7 @@ def is_generic_title(title: str) -> bool:
         or lowered.startswith("~/")
         or lowered.startswith("/")
         or lowered in {"auto-save", "auto-save summary", "session summary"}
+        or "progress on session work" in lowered
     )
 
 
@@ -96,10 +98,9 @@ def main() -> int:
     if is_generic_title(title):
       failures.append("generic_title")
 
-    if bundle.get("derived", {}).get("grounded_tags_available"):
-        meaningful = [tag for tag in tags if tag not in GENERIC_TAGS]
-        if not meaningful:
-            failures.append("generic_tags")
+    meaningful = [tag for tag in tags if tag not in GENERIC_TAGS]
+    if not meaningful:
+        failures.append("generic_tags")
 
     for heading in ("Executive Summary", "Working State", "Files Changed", "Concrete Next Steps"):
         if not section_present(text, heading):

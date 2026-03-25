@@ -13,9 +13,12 @@ HISTORY_RENDER_MODE="${CLAUDE_EXIT_HISTORY_RENDER_MODE:-session-end-sync}"
 mkdir -p "$(dirname "$LOGFILE")"
 
 INPUT=$(cat)
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // ""')
-CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // ""')
-HOOK_EVENT=$(printf '%s' "$INPUT" | jq -r '.hook_event_name // "SessionEnd"')
+eval "$(printf '%s' "$INPUT" | jq -r '
+  "SESSION_ID=" + ((.session_id // "") | @sh),
+  "CWD=" + ((.cwd // "") | @sh),
+  "HOOK_EVENT=" + ((.hook_event_name // "SessionEnd") | @sh)')"
+
+epoch_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
 
 log_json() {
   jq -cn \
@@ -43,11 +46,7 @@ run_phase() {
   local phase_exit=0
 
   result_file=$(mktemp /tmp/claude-exit-"$phase"-XXXXXX)
-  start_epoch=$(python3 - <<'PY'
-import time
-print(int(time.time() * 1000))
-PY
-)
+  start_epoch=$(epoch_ms)
 
   if [ "$phase" = "git" ]; then
     if printf '%s' "$INPUT" | AUTO_GIT_RESULT_FILE="$result_file" "$script_path"; then
@@ -63,11 +62,7 @@ PY
     fi
   fi
 
-  end_epoch=$(python3 - <<'PY'
-import time
-print(int(time.time() * 1000))
-PY
-)
+  end_epoch=$(epoch_ms)
 
   local duration_ms=$((end_epoch - start_epoch))
   local result detail output_path repo_root branch
