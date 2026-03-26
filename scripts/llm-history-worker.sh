@@ -4,8 +4,6 @@
 # Reads all input from a temp work file (JSON) passed as $1.
 
 set -euo pipefail
-# NOTE: pipefail means ALL command substitutions with jq/grep pipelines
-# must use || true — jq returns non-zero on any malformed JSONL line.
 
 # Worker runs in its own process — independently unset CLAUDECODE
 unset CLAUDECODE 2>/dev/null || true

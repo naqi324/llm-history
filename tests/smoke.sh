@@ -8,8 +8,6 @@ WORKER_SCRIPT="$ROOT_DIR/scripts/llm-history-worker.sh"
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 GOLDEN_DIR="$ROOT_DIR/tests/golden"
 FIXED_CWD="/Users/naqi.khan/git/skills/llm-history"
-TODAY_YYMMDD=$(date +%y%m%d)
-TODAY_ISO=$(date +%Y-%m-%d)
 
 # shellcheck source=tests/helpers.sh
 source "$ROOT_DIR/tests/helpers.sh"
@@ -69,81 +67,15 @@ append_assistant_lines() {
   done
 }
 
-write_lock_file() {
-  local path="$1"
-  local saved_at_epoch="$2"
-  local transcript_lines="$3"
-  printf 'saved_at_epoch=%s\ntranscript_lines=%s\n' \
-    "$saved_at_epoch" "$transcript_lines" > "$path"
-}
-
-build_hook_input() {
-  local session_id="$1"
-  local transcript_path="$2"
-  local event="${3:-Stop}"
-  local last_assistant_message="${4:-Need to validate fallback formatting.}"
-  local cwd="${5:-$FIXED_CWD}"
-
-  jq -n \
-    --arg session_id "$session_id" \
-    --arg transcript_path "$transcript_path" \
-    --arg cwd "$cwd" \
-    --arg hook_event_name "$event" \
-    --arg last_assistant_message "$last_assistant_message" \
-    '{
-      session_id: $session_id,
-      transcript_path: $transcript_path,
-      cwd: $cwd,
-      hook_event_name: $hook_event_name,
-      stop_hook_active: false,
-      last_assistant_message: $last_assistant_message
-    }'
-}
-
 run_dispatcher() {
   local session_id="$1"
   local transcript_path="$2"
-  local event="${3:-Stop}"
-  local last_assistant_message="${4:-Need to validate fallback formatting.}"
-  local cwd="${5:-$FIXED_CWD}"
+  local cwd="${3:-$FIXED_CWD}"
+  local event="${4:-Stop}"
+  local last_assistant_message="${5:-Need to validate fallback formatting.}"
 
-  build_hook_input "$session_id" "$transcript_path" "$event" "$last_assistant_message" "$cwd" \
+  build_hook_input "$session_id" "$transcript_path" "$cwd" "$event" "$last_assistant_message" \
     | "$SAVE_SCRIPT"
-}
-
-build_worker_file() {
-  local work_file="$1"
-  local session_id="$2"
-  local transcript_path="$3"
-  local output_path="$4"
-  local event="${5:-Stop}"
-  local last_assistant_message="${6:-Need to validate fallback formatting.}"
-  local cwd="${7:-$FIXED_CWD}"
-  local hook_input_json
-
-  hook_input_json=$(build_hook_input "$session_id" "$transcript_path" "$event" "$last_assistant_message" "$cwd")
-
-  jq -n \
-    --arg transcript_path "$transcript_path" \
-    --arg cwd "$cwd" \
-    --arg hook_event "$event" \
-    --arg session_id "$session_id" \
-    --arg file_path "$output_path" \
-    --arg base_name "${TODAY_YYMMDD}-llm-history" \
-    --arg date_iso "$TODAY_ISO" \
-    --arg saved_at "$(date -Iseconds)" \
-    --arg hook_input_json "$hook_input_json" \
-    '{
-      transcript_path: $transcript_path,
-      cwd: $cwd,
-      hook_event: $hook_event,
-      session_id: $session_id,
-      file_path: $file_path,
-      base_name: $base_name,
-      date_iso: $date_iso,
-      saved_at: $saved_at,
-      hook_input_json: $hook_input_json
-    }' > "$work_file"
 }
 
 compare_to_golden() {
@@ -283,7 +215,7 @@ scenario_worker_fallback() {
   git -C "$fallback_cwd" add README.md
   git -C "$fallback_cwd" commit -m "Initial commit" >/dev/null
   copy_transcript_fixture "$transcript"
-  build_worker_file "$work_file" "$session_id" "$transcript" "$output_path" "Stop" "Need to validate fallback formatting." "$fallback_cwd"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$fallback_cwd" "$output_path" "Stop" "Need to validate fallback formatting."
   "$WORKER_SCRIPT" "$work_file"
 
   assert_file_exists "$output_path"

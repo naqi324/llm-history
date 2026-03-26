@@ -268,7 +268,6 @@ if [ "$SYNC_MODE" = "1" ]; then
       SYNC_DETAIL="sync-${RENDER_MODE}"
     fi
     log "DONE: session=$SESSION_ID event=$HOOK_EVENT sync=1 render_mode=$RENDER_MODE -> $FILE_PATH"
-    cleanup_stale_artifacts
     finish "success" "$SYNC_DETAIL" "$FILE_PATH" 0
   fi
   if [ -n "$LOCK_FILE" ]; then
@@ -282,6 +281,5 @@ if [ "$SYNC_MODE" = "1" ]; then
 else
   nohup "$SCRIPT_DIR/llm-history-worker.sh" "$WORK_FILE" </dev/null >/dev/null 2>&1 &
   log "DISPATCH: session=$SESSION_ID event=$HOOK_EVENT worker_pid=$! -> $FILE_PATH"
-  cleanup_stale_artifacts
   finish "success-dispatched" "async" "$FILE_PATH" 0
 fi

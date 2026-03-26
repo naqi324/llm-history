@@ -7,7 +7,6 @@ ORCHESTRATOR="$ROOT_DIR/scripts/exit-orchestrator.sh"
 AUDIT_SCRIPT="$ROOT_DIR/scripts/exit-audit.sh"
 REAL_GIT_SCRIPT="/Users/naqi.khan/git/CLAUDE-md/.claude/hooks/auto-git-commit.sh"
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
-TODAY_YYMMDD=$(date +%y%m%d)
 
 # shellcheck source=tests/helpers.sh
 source "$ROOT_DIR/tests/helpers.sh"
@@ -64,25 +63,6 @@ EOF
   unset CLAUDE_EXIT_HISTORY_SCRIPT
 }
 
-build_hook_input() {
-  local session_id="$1"
-  local transcript_path="$2"
-  local cwd="$3"
-
-  jq -n \
-    --arg session_id "$session_id" \
-    --arg transcript_path "$transcript_path" \
-    --arg cwd "$cwd" \
-    '{
-      session_id: $session_id,
-      transcript_path: $transcript_path,
-      cwd: $cwd,
-      hook_event_name: "SessionEnd",
-      stop_hook_active: false,
-      last_assistant_message: "Exit orchestrator smoke test."
-    }'
-}
-
 write_trivial_transcript() {
   local target="$1"
   printf '%s\n' '{}' '{}' '{}' '{}' '{}' '{}' '{}' '{}' > "$target"
@@ -109,7 +89,8 @@ run_orchestrator() {
   local transcript_path="$2"
   local cwd="$3"
 
-  build_hook_input "$session_id" "$transcript_path" "$cwd" | "$ORCHESTRATOR"
+  build_hook_input "$session_id" "$transcript_path" "$cwd" "SessionEnd" "Exit orchestrator smoke test." \
+    | "$ORCHESTRATOR"
 }
 
 assert_phase_order() {

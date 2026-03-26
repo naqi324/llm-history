@@ -8,7 +8,6 @@ CONTEXT_SCRIPT="$ROOT_DIR/scripts/llm-history-context.py"
 CHECKER_SCRIPT="$ROOT_DIR/tests/check_resume_readiness.py"
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 REPORT_DIR="$ROOT_DIR/tests/logs"
-TODAY_YYMMDD=$(date +%y%m%d)
 SCENARIO_REPORTS=()
 
 # shellcheck source=tests/helpers.sh
@@ -56,64 +55,6 @@ copy_quality_transcript() {
   local project_root="$3"
   sed "s|__PROJECT_ROOT__|$project_root|g" \
     "$FIXTURES_DIR/quality/${fixture_name}" > "$target"
-}
-
-build_hook_input() {
-  local session_id="$1"
-  local transcript_path="$2"
-  local cwd="$3"
-  local event="${4:-Stop}"
-  local last_assistant_message="${5:-Grounded quality test.}"
-
-  jq -n \
-    --arg session_id "$session_id" \
-    --arg transcript_path "$transcript_path" \
-    --arg cwd "$cwd" \
-    --arg hook_event_name "$event" \
-    --arg last_assistant_message "$last_assistant_message" \
-    '{
-      session_id: $session_id,
-      transcript_path: $transcript_path,
-      cwd: $cwd,
-      hook_event_name: $hook_event_name,
-      stop_hook_active: false,
-      last_assistant_message: $last_assistant_message
-    }'
-}
-
-build_worker_file() {
-  local work_file="$1"
-  local session_id="$2"
-  local transcript_path="$3"
-  local cwd="$4"
-  local output_path="$5"
-  local event="${6:-Stop}"
-  local last_assistant_message="${7:-Grounded quality test.}"
-  local hook_input_json
-
-  hook_input_json=$(build_hook_input "$session_id" "$transcript_path" "$cwd" "$event" "$last_assistant_message")
-
-  jq -n \
-    --arg transcript_path "$transcript_path" \
-    --arg cwd "$cwd" \
-    --arg hook_event "$event" \
-    --arg session_id "$session_id" \
-    --arg file_path "$output_path" \
-    --arg base_name "${TODAY_YYMMDD}-$(basename "$cwd")" \
-    --arg date_iso "$(date +%Y-%m-%d)" \
-    --arg saved_at "$(date -Iseconds)" \
-    --arg hook_input_json "$hook_input_json" \
-    '{
-      transcript_path: $transcript_path,
-      cwd: $cwd,
-      hook_event: $hook_event,
-      session_id: $session_id,
-      file_path: $file_path,
-      base_name: $base_name,
-      date_iso: $date_iso,
-      saved_at: $saved_at,
-      hook_input_json: $hook_input_json
-    }' > "$work_file"
 }
 
 run_and_score() {

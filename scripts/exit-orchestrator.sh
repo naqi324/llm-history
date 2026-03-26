@@ -18,7 +18,7 @@ eval "$(printf '%s' "$INPUT" | jq -r '
   "CWD=" + ((.cwd // "") | @sh),
   "HOOK_EVENT=" + ((.hook_event_name // "SessionEnd") | @sh)')"
 
-epoch_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+epoch_ms() { printf '%s000' "$(date +%s)"; }
 
 log_json() {
   jq -cn \
