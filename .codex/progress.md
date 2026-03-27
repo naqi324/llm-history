@@ -2,7 +2,7 @@
 
 ## 2026-03-20
 - Implemented `scripts/exit-orchestrator.sh` as the authoritative Claude `SessionEnd` pipeline for git first, then `llm-history`.
-- Added structured phase result reporting to `scripts/llm-history-save.sh` and `/Users/naqi.khan/git/CLAUDE-md/.claude/hooks/auto-git-commit.sh`.
+- Added structured phase result reporting to `scripts/llm-history-save.sh` and `/Users/naqi.khan/git/system/CLAUDE-md/.claude/hooks/auto-git-commit.sh`.
 - Added `scripts/exit-audit.sh` and `tests/exit-orchestrator-smoke.sh`.
 - Updated `~/.claude/settings.json` so `SessionEnd` points to the orchestrator and the old parallel `Stop` exit hooks are no longer authoritative.
 - Verified with `tests/smoke.sh` and `tests/exit-orchestrator-smoke.sh`.

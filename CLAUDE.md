@@ -34,7 +34,7 @@ Configured in `~/.claude/settings.json`:
 ## Exit Orchestration
 
 - `/exit` now runs one authoritative synchronous pipeline:
-  - git phase via `/Users/naqi.khan/git/CLAUDE-md/.claude/hooks/auto-git-commit.sh`
+  - git phase via `/Users/naqi.khan/git/system/CLAUDE-md/.claude/hooks/auto-git-commit.sh`
   - history phase via `scripts/llm-history-save.sh` with `LLM_HISTORY_SYNC=1` and `LLM_HISTORY_RENDER_MODE=session-end-sync`
 - History starts only after the git phase exits.
 - `SessionEnd` history renders directly from the grounded context bundle and never calls `claude -p`.

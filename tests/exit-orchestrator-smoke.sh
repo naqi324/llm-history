@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ORCHESTRATOR="$ROOT_DIR/scripts/exit-orchestrator.sh"
 AUDIT_SCRIPT="$ROOT_DIR/scripts/exit-audit.sh"
-REAL_GIT_SCRIPT="/Users/naqi.khan/git/CLAUDE-md/.claude/hooks/auto-git-commit.sh"
+REAL_GIT_SCRIPT="/Users/naqi.khan/git/system/CLAUDE-md/.claude/hooks/auto-git-commit.sh"
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 
 # shellcheck source=tests/helpers.sh
