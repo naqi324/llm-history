@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOGFILE="${CLAUDE_EXIT_LOGFILE:-/tmp/claude-exit-orchestrator.log}"
-GIT_SCRIPT="${CLAUDE_EXIT_GIT_SCRIPT:-/Users/naqi.khan/git/CLAUDE-md/.claude/hooks/auto-git-commit.sh}"
+GIT_SCRIPT="${CLAUDE_EXIT_GIT_SCRIPT:-/Users/naqi.khan/git/system/CLAUDE-md/.claude/hooks/auto-git-commit.sh}"
 HISTORY_SCRIPT="${CLAUDE_EXIT_HISTORY_SCRIPT:-$SCRIPT_DIR/llm-history-save.sh}"
 HISTORY_RENDER_MODE="${CLAUDE_EXIT_HISTORY_RENDER_MODE:-session-end-sync}"
 
