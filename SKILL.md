@@ -131,6 +131,13 @@ Key guidance:
 - Never ask clarifying questions or write conversational filler in the saved handoff.
 - Use single quotes around the `title` value in YAML frontmatter to handle special characters.
 
+## Gotchas
+
+- **Session ID may be wrong with multiple Claude instances**: The `ls -t ~/.claude/projects/*/*.jsonl | head -1` command returns the most recently modified transcript. If another Claude Code instance is running, this may not be the current session. Cross-check with the CWD project path.
+- **Saving near compaction risks incomplete context**: The note reflects what Claude currently remembers, not the full conversation. If context has been compacted, explicitly note which parts may be incomplete in the Working State section.
+- **300-line limit triage order**: When the file exceeds 300 lines, cut in this order: Failed Approaches, Warnings, then condense Files Changed. Never cut Concrete Next Steps or Working State -- these are essential for resumption.
+- **YAML title values with special characters break Obsidian**: Colons, quotes, and hash characters in the `title` frontmatter field break Obsidian's YAML parser. Always wrap the title value in single quotes.
+
 ### Step 6: Confirm
 
 After writing the file, report to the user:
