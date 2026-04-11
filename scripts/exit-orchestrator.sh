@@ -101,7 +101,7 @@ run_phase "git" "$GIT_SCRIPT" "GIT"
 run_phase "history" "$HISTORY_SCRIPT" "HISTORY"
 
 if [ "$GIT_RESULT" = "error" ] || [ "$HISTORY_RESULT" = "error" ] || [ "$GIT_EXIT" -ne 0 ] || [ "$HISTORY_EXIT" -ne 0 ]; then
-  overall_result="error"
+  overall_result="warning"
 fi
 
 log_json \
@@ -115,9 +115,5 @@ log_json \
   --arg history_render_mode "$HISTORY_RENDER_MODE" \
   --arg overall "$overall_result" \
   '{timestamp:$timestamp, session_id:$session_id, cwd:$cwd, hook_event:$hook_event, phase:"pipeline", state:"done", git_result:$git_result, git_detail:$git_detail, git_repo_root:$git_repo_root, git_branch:$git_branch, history_result:$history_result, history_detail:$history_detail, history_output_path:$history_output_path, history_render_mode:$history_render_mode, overall:$overall}'
-
-if [ "$overall_result" = "error" ]; then
-  exit 1
-fi
 
 exit 0
