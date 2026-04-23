@@ -31,7 +31,8 @@ The session focused on: Please add tests. Recent progress: Next step is verifyin
 
 ## Concrete Next Steps
 
-1. Run `cd <TMP_ROOT>/llm-history && git status --short` to confirm the current working tree state.
+1. Execute: Please add tests. Use `rg` to locate the relevant entry point.
+2. Run `cd <TMP_ROOT>/llm-history && git log -n 3 --oneline` to confirm the last recorded commit.
 
 ## Warnings
 

@@ -315,6 +315,49 @@ scenario_plan_mode_surface() {
   assert_jq '.derived.plan_state.plan_finalized == false' "$bundle_file"
   assert_contains "$output_path" "Paused in plan mode"
   assert_contains "$output_path" "/Users/naqi.khan/.claude/plans/refactor-thing.md"
+  # Plan-mode is the highest-priority next-step case: step 1 must point at the plan file.
+  assert_jq '.derived.next_steps[0] | test("Open the plan at `/Users/naqi.khan/.claude/plans/refactor-thing.md`")' "$bundle_file"
+}
+
+scenario_edit_then_error() {
+  echo "Scenario 10: edit followed by failing command yields a reproduction step 1"
+  setup_env edit-then-error
+
+  local transcript="$TEST_ROOT/transcript-edit-then-error.jsonl"
+  local session_id="bbbbbbb0-0000-0000-0000-0000000000b0"
+  local work_file="$TEST_ROOT/work.json"
+  local bundle_file="$TEST_ROOT/bundle.json"
+  local output_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history.md"
+
+  cp "$FIXTURES_DIR/transcript-edit-then-error.jsonl" "$transcript"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$FIXED_CWD" "$output_path"
+  python3 "$ROOT_DIR/scripts/llm-history-context.py" "$work_file" > "$bundle_file"
+  "$WORKER_SCRIPT" "$work_file"
+
+  # Step 1 names the failing pytest command and the edited file.
+  assert_jq '.derived.next_steps[0] | test("pytest tests/test_auth\\.py::test_login")' "$bundle_file"
+  assert_jq '.derived.next_steps[0] | test("src/auth\\.py")' "$bundle_file"
+}
+
+scenario_generic_step_rejected() {
+  echo "Scenario 11: denied generic step never becomes step 1"
+  setup_env generic-rejected
+
+  local transcript="$TEST_ROOT/transcript.jsonl"
+  local session_id="ccccccc0-0000-0000-0000-0000000000c0"
+  local work_file="$TEST_ROOT/work.json"
+  local bundle_file="$TEST_ROOT/bundle.json"
+  local output_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history.md"
+
+  # Base fixture has no tool calls and a specific user ask; expect priority 4
+  # (imperative user ask) -- not "Run git status" or any denied phrase.
+  copy_transcript_fixture "$transcript"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$FIXED_CWD" "$output_path"
+  python3 "$ROOT_DIR/scripts/llm-history-context.py" "$work_file" > "$bundle_file"
+  "$WORKER_SCRIPT" "$work_file"
+
+  assert_jq '.derived.next_steps[0] | test("^Run `git status"; "i") | not' "$bundle_file"
+  assert_jq '.derived.next_steps[0] | test("^Continue\\.?$"; "i") | not' "$bundle_file"
 }
 
 scenario_first_save
@@ -326,5 +369,7 @@ scenario_session_end_mode
 scenario_title_sanitation
 scenario_instruction_dump_elided
 scenario_plan_mode_surface
+scenario_edit_then_error
+scenario_generic_step_rejected
 
 echo "All smoke tests passed."

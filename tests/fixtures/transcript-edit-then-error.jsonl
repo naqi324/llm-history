@@ -1,0 +1,9 @@
+{"type":"custom-title","customTitle":"edit-then-error-fixture"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Please fix the failing test."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-edit-1","name":"Edit","input":{"file_path":"/tmp/smoke-fixture/src/auth.py","old_string":"old","new_string":"new"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-edit-1","content":"edit applied"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-bash-1","name":"Bash","input":{"command":"pytest tests/test_auth.py::test_login"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-bash-1","is_error":true,"content":"FAILED tests/test_auth.py::test_login - AssertionError: expected 200, got 401"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The fix didn't resolve the 401; need to investigate the token refresh path."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Paused to review the failure before attempting another edit."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Captured the failing command and the error output in the handoff."}]}}

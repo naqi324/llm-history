@@ -540,21 +540,137 @@ def summarize_remaining(status: str, repo: dict[str, Any], failures: list[str]) 
     return "The work appears to be in progress; use the next steps below to resume from the latest grounded state."
 
 
-def build_next_steps(repo: dict[str, Any], touched_files: list[str], checks: list[str], failures: list[str], project_dir: str) -> list[str]:
-    steps: list[str] = []
-    working_dir = repo.get("repo_root_display") or project_dir
+# Steps that are too generic to serve as a resumption instruction on their own.
+# These will be rejected if produced as step 1.
+_GENERIC_NEXT_STEP_DENY = (
+    re.compile(r"^run `git status\b[^`]*`\.?\s*$", re.IGNORECASE),
+    re.compile(r"^review the code\.?\s*$", re.IGNORECASE),
+    re.compile(r"^continue the work\.?\s*$", re.IGNORECASE),
+    re.compile(r"^open the file\.?\s*$", re.IGNORECASE),
+    re.compile(r"^continue\.?\s*$", re.IGNORECASE),
+)
 
-    if repo.get("is_git"):
-        steps.append(f"Run `cd {working_dir} && git status --short` to confirm the current working tree state.")
-    if checks:
-        steps.append(f"Re-run `cd {working_dir} && {checks[0]}` and confirm it still passes.")
-    if touched_files:
-        steps.append(f"Open `{touched_files[0]}` and continue from the latest recorded change in this handoff.")
-    if failures:
-        steps.append(f"Reproduce and resolve the recorded failure: {failures[0]}")
+
+def _is_denied_step(step: str) -> bool:
+    text = step.strip("- ").strip()
+    return any(pattern.match(text) for pattern in _GENERIC_NEXT_STEP_DENY)
+
+
+def _last_edit_event(
+    tool_use_timeline: list[dict[str, Any]],
+    tool_result_by_id: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return (tool_use_event, result_or_none) for the most recent Edit/Write/MultiEdit."""
+    for event in reversed(tool_use_timeline):
+        if event["tool"] in {"Edit", "MultiEdit", "Write"}:
+            result = tool_result_by_id.get(event["id"])
+            return event, result
+    return None, None
+
+
+def _last_bash_event(
+    tool_use_timeline: list[dict[str, Any]],
+    tool_result_by_id: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    for event in reversed(tool_use_timeline):
+        if event["tool"] == "Bash":
+            result = tool_result_by_id.get(event["id"])
+            return event, result
+    return None, None
+
+
+def build_next_steps(
+    repo: dict[str, Any],
+    touched_files: list[str],
+    checks: list[str],
+    failures: list[str],
+    project_dir: str,
+    *,
+    plan_state: dict[str, Any],
+    tool_use_timeline: list[dict[str, Any]],
+    tool_result_by_id: dict[str, dict[str, Any]],
+    last_user_ask: str,
+    repo_root: str,
+) -> list[str]:
+    """Produce 1-3 concrete, resumption-grade next steps.
+
+    Priority ladder for step 1 (first match wins):
+      1. Plan-mode pause: point at the plan file.
+      2. Last Edit/Write produced an error result: reproduce + fix.
+      3. Last Edit/Write succeeded: continue editing, with a verification.
+      4. Last user ask has an imperative verb: execute it.
+      5. Fallback: resume from the latest concrete assistant action.
+    """
+    working_dir = repo.get("repo_root_display") or project_dir
+    steps: list[str] = []
+
+    plan_file = plan_state.get("plan_file") or ""
+    if plan_state.get("in_plan_mode") and plan_file:
+        steps.append(
+            f"Open the plan at `{plan_file}` and continue from its Next Steps section."
+        )
+
+    edit_event, edit_result = _last_edit_event(tool_use_timeline, tool_result_by_id)
+    edit_display = display_path(edit_event["path"], repo_root or None) if edit_event else ""
+
+    if not steps and edit_event and edit_result and edit_result.get("is_error"):
+        bash_event, _ = _last_bash_event(tool_use_timeline, tool_result_by_id)
+        failing_command = (bash_event or {}).get("command") or (checks[0] if checks else "")
+        if failing_command:
+            steps.append(
+                f"Re-run `{failing_command}` to reproduce the error in `{edit_display}`, "
+                f"then resolve the failure recorded under Failed Approaches."
+            )
+        else:
+            steps.append(
+                f"Open `{edit_display}` and fix the error recorded under Failed Approaches; "
+                f"there is no captured check command to re-run."
+            )
+
+    if not steps and edit_event:
+        verify = checks[0] if checks else "the project's test command"
+        steps.append(
+            f"Continue editing `{edit_display}`; the last change targeted this file. "
+            f"Verify with `{verify}` before committing."
+        )
+
+    if not steps and last_user_ask:
+        trimmed = last_user_ask.strip().strip(".!?")
+        if trimmed and len(trimmed.split()) >= 2:
+            first_touched = touched_files[0] if touched_files else ""
+            entry_hint = f"Start with `{first_touched}`." if first_touched else "Use `rg` to locate the relevant entry point."
+            steps.append(f"Execute: {trimmed[:140]}. {entry_hint}")
+
     if not steps:
-        steps.append(f"Re-open the project at `{project_dir}` and continue from the latest session notes in this handoff.")
-    return dedupe(steps, limit=4)
+        steps.append(
+            f"Re-open the project at `{project_dir}` and continue from the latest milestone "
+            f"in the Executive Summary above."
+        )
+
+    if steps and _is_denied_step(steps[0]):
+        steps[0] = (
+            f"Re-open the project at `{project_dir}` and continue from the latest milestone "
+            f"in the Executive Summary above."
+        )
+
+    # Step 2: always a verification.
+    if checks:
+        verify_step = f"Run `cd {working_dir} && {checks[0]}` and confirm it still passes."
+    elif repo.get("is_git") and not repo.get("status_clean"):
+        dirty_summary = "; ".join((repo.get("status_short") or [])[:3]) or "uncommitted changes"
+        verify_step = f"Run `cd {working_dir} && git status --short` and review the uncommitted changes ({dirty_summary})."
+    elif repo.get("is_git"):
+        verify_step = f"Run `cd {working_dir} && git log -n 3 --oneline` to confirm the last recorded commit."
+    else:
+        verify_step = "Inspect the working directory listing and confirm the expected files are present."
+    if not _is_denied_step(verify_step):
+        steps.append(verify_step)
+
+    # Optional step 3: an outstanding failure to chase down, if not already the driver of step 1.
+    if failures and "Failed Approaches" not in (steps[0] or ""):
+        steps.append(f"Reproduce and resolve the recorded failure: {failures[0]}")
+
+    return dedupe(steps, limit=3)
 
 
 def build_file_lines(
@@ -685,6 +801,12 @@ def main() -> int:
     permission_mode_last = ""
     plan_attachment: dict[str, Any] | None = None
     exit_plan_mode_called = False
+    # Tool-call timeline: each entry = {"tool", "path", "command", "id"}.
+    # Needed so build_next_steps can find the most recent Edit/Write and
+    # pair it with the following tool_result (ok/error).
+    tool_use_timeline: list[dict[str, Any]] = []
+    # Map tool_use.id -> result metadata (error/text). Populated as we walk.
+    tool_result_by_id: dict[str, dict[str, Any]] = {}
 
     with open(transcript_path, "r", encoding="utf-8") as handle:
         for raw_line in handle:
@@ -743,8 +865,10 @@ def main() -> int:
                         payload = item.get("input", {})
                         if not isinstance(payload, dict):
                             continue
+                        command_text = ""
                         if name == "Bash":
-                            bash_commands.append(normalize_text(payload.get("command")))
+                            command_text = normalize_text(payload.get("command"))
+                            bash_commands.append(command_text)
                         path = normalize_path_value(normalize_text(payload.get("file_path") or payload.get("path")))
                         if name == "Read" and path:
                             read_files.append(path)
@@ -754,6 +878,12 @@ def main() -> int:
                             write_files.append(path)
                         elif path:
                             read_files.append(path)
+                        tool_use_timeline.append({
+                            "tool": name,
+                            "path": path,
+                            "command": command_text,
+                            "id": normalize_text(item.get("id")),
+                        })
                         continue
 
                     if item_type == "tool_result" and role == "user":
@@ -761,8 +891,17 @@ def main() -> int:
                         sanitized_result = sanitize_transcript_text(raw_result, label="tool-result")
                         result_text = trim_multiline(sanitized_result, max_lines=6, max_chars=260)
                         lowered = result_text.lower()
-                        if item.get("is_error") or any(token in lowered for token in ("error", "traceback", "failed")):
+                        is_error = bool(item.get("is_error")) or any(
+                            token in lowered for token in ("error", "traceback", "failed")
+                        )
+                        if is_error:
                             error_results.append(result_text)
+                        result_id = normalize_text(item.get("tool_use_id"))
+                        if result_id:
+                            tool_result_by_id[result_id] = {
+                                "is_error": is_error,
+                                "text": result_text,
+                            }
 
     repo = probe_repo(cwd)
     project_dir = short_home(cwd)
@@ -827,7 +966,18 @@ def main() -> int:
             ],
             "working_state_lines": working_state_lines,
             "files_changed_lines": build_file_lines(repo_root, read_files, edit_files + write_files, snapshot_files),
-            "next_steps": build_next_steps(repo, display_touched, checks, failures, project_dir),
+            "next_steps": build_next_steps(
+                repo,
+                display_touched,
+                checks,
+                failures,
+                project_dir,
+                plan_state=plan_state,
+                tool_use_timeline=tool_use_timeline,
+                tool_result_by_id=tool_result_by_id,
+                last_user_ask=last_user_ask,
+                repo_root=repo_root,
+            ),
             "failed_lines": [f"- {line}" for line in failures[:4]],
             "warning_lines": (
                 [f"- Repo probe warning: {repo['probe_error']}"] if repo.get("probe_error") else []
