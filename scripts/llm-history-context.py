@@ -119,6 +119,115 @@ def normalize_text(value: Any) -> str:
     return text
 
 
+# --- Instruction-dump detection (Phase 1.3) ---
+#
+# The renderer previously let large verbatim skill-file blocks leak from the
+# assistant narrative into the Executive Summary because the model faithfully
+# repeated whatever the transcript fed it. Guard at the extractor layer: if a
+# text block looks like a pasted skill definition (or a similar instructional
+# blob), replace it with an elision note *before* it enters the context bundle.
+#
+# Heuristic: all four conditions must hold.
+#   1. >= 20 lines
+#   2. >= 40% of non-empty lines begin with markdown header/bullet/bold-label
+#   3. >= 3 instruction-vocabulary pattern hits
+#   4. >= 2 skill-signature pattern hits
+# Condition 4 is the tight anchor that separates skill dumps from legitimate
+# structured content (commit lists, assistant-authored plans, test output).
+
+INSTRUCTION_VOCAB_PATTERNS = (
+    re.compile(r"\bUsage\b"),
+    re.compile(r"\bArguments\b"),
+    re.compile(r"\bWhen to use\b", re.IGNORECASE),
+    re.compile(r"\bWorkflow\b", re.IGNORECASE),
+    re.compile(r"\bStep \d+\b"),
+    re.compile(r"\bPhase \d+\b"),
+    re.compile(r"^##\s*(Do|Don'?t)\b", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"\bIMPORTANT\b"),
+    re.compile(r"\bCRITICAL\b"),
+    re.compile(r"\bMUST\b"),
+    re.compile(r"\bSupported Flags\b", re.IGNORECASE),
+    re.compile(r"^Example:", re.MULTILINE),
+    re.compile(r"\bSyntax\b"),
+)
+
+SKILL_SIGNATURE_PATTERNS = (
+    re.compile(r"~/\.claude/skills/[\w\-]+/"),
+    re.compile(r"\bSKILL\.md\b"),
+    re.compile(r"\bYAML frontmatter\b", re.IGNORECASE),
+    re.compile(r"^#{1,6}\s+Skill Contract\b", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^#{1,6}\s+Critical Rules\b", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^#{1,6}\s+Supported Flags\b", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^#{1,6}\s+Troubleshooting\b", re.MULTILINE | re.IGNORECASE),
+)
+
+INSTRUCTION_BLOCK_LINE_PATTERNS = (
+    re.compile(r"^#{1,6}\s"),
+    re.compile(r"^[-*]\s"),
+    re.compile(r"^\d+\.\s"),
+    re.compile(r"^\*\*[^*]+\*\*:"),
+)
+
+MAX_TEXT_BLOCK_CHARS = 10_000
+
+
+def _count_pattern_hits(text: str, patterns: tuple[re.Pattern[str], ...]) -> int:
+    return sum(1 for pattern in patterns if pattern.search(text))
+
+
+def is_instruction_dump(text: str) -> bool:
+    """Return True iff ``text`` looks like a pasted skill/instruction block."""
+    if not text:
+        return False
+    lines = text.split("\n")
+    if len(lines) < 20:
+        return False
+
+    non_empty = [line for line in lines if line.strip()]
+    if not non_empty:
+        return False
+
+    header_like = sum(
+        1 for line in non_empty
+        if any(pattern.match(line) for pattern in INSTRUCTION_BLOCK_LINE_PATTERNS)
+    )
+    if header_like / len(non_empty) < 0.40:
+        return False
+
+    if _count_pattern_hits(text, INSTRUCTION_VOCAB_PATTERNS) < 3:
+        return False
+    if _count_pattern_hits(text, SKILL_SIGNATURE_PATTERNS) < 2:
+        return False
+
+    return True
+
+
+def elide_if_oversized(text: str, *, label: str = "block") -> str:
+    """Cap a single block at MAX_TEXT_BLOCK_CHARS to prevent OOM on pathological inputs."""
+    if not text:
+        return ""
+    if len(text) <= MAX_TEXT_BLOCK_CHARS:
+        return text
+    line_count = text.count("\n") + 1
+    return (
+        f"[{label} elided: {len(text)} chars, {line_count} lines; exceeded "
+        f"{MAX_TEXT_BLOCK_CHARS}-char single-block cap]"
+    )
+
+
+def sanitize_transcript_text(text: str, *, label: str = "assistant") -> str:
+    """Elide oversized text and replace instruction dumps before promotion into the bundle."""
+    capped = elide_if_oversized(text, label=label)
+    if capped is not text and capped.startswith("["):
+        return capped
+    if is_instruction_dump(capped):
+        line_count = capped.count("\n") + 1
+        return (
+            f"[instruction-dump elided: {len(capped)} chars, {line_count} lines]"
+        )
+    return capped
+
+
 def trim_multiline(value: str, max_lines: int = 8, max_chars: int = 320) -> str:
     lines = [normalize_text(line) for line in value.splitlines()]
     lines = [line for line in lines if line]
@@ -544,7 +653,9 @@ def main() -> int:
                         continue
                     item_type = item.get("type")
                     if item_type == "text":
-                        text = normalize_text(item.get("text"))
+                        raw_text = item.get("text") or ""
+                        sanitized = sanitize_transcript_text(raw_text, label=role)
+                        text = normalize_text(sanitized)
                         if role == "assistant":
                             assistant_texts.append(text)
                         else:
@@ -571,7 +682,9 @@ def main() -> int:
                         continue
 
                     if item_type == "tool_result" and role == "user":
-                        result_text = trim_multiline(tool_result_to_text(item.get("content")), max_lines=6, max_chars=260)
+                        raw_result = tool_result_to_text(item.get("content"))
+                        sanitized_result = sanitize_transcript_text(raw_result, label="tool-result")
+                        result_text = trim_multiline(sanitized_result, max_lines=6, max_chars=260)
                         lowered = result_text.lower()
                         if item.get("is_error") or any(token in lowered for token in ("error", "traceback", "failed")):
                             error_results.append(result_text)

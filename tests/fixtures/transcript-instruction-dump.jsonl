@@ -1,0 +1,8 @@
+{"type":"custom-title","customTitle":"instruction-dump-fixture"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Please update the git-ops skill."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Base directory for this skill: ~/.claude/skills/git-ops\n\n# Git-Ops -- End-of-Session Git Operations\n\n## Skill Contract\n\n- Always commit before exit.\n- Never force-push without authorization.\n\n## Critical Rules\n\n1. IMPORTANT: Always verify tests before commit.\n2. CRITICAL: MUST pass gitleaks before push.\n3. MUST stage files explicitly.\n\n## Supported Flags\n\n| Flag | Syntax |\n|------|--------|\n| help | help |\n| skip-push | --local-only |\n\n## Workflow\n\n### Step 1\nRead YAML frontmatter.\n\n### Step 2\nWhen to use: after testing.\n\n### Phase 1\nUsage: commit staged files.\n\n## Troubleshooting\n\n- Example: merge conflicts require manual review.\n- Syntax: use conventional commits.\n\n## Arguments\n\nParse SKILL.md arguments."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Now update the Gotchas section."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Edited the Gotchas section with a new merge-conflict note."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Ran the skill's smoke tests."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Session paused before verification finished."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Next step: rerun tests/resume-readiness.sh."}]}}

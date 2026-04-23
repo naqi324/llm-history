@@ -268,6 +268,30 @@ scenario_title_sanitation() {
   fi
 }
 
+scenario_instruction_dump_elided() {
+  echo "Scenario 8: instruction-dump assistant text is elided before it enters the summary"
+  setup_env instruction-dump
+
+  local transcript="$TEST_ROOT/transcript-instruction-dump.jsonl"
+  local session_id="88888888-8888-8888-8888-888888888888"
+  local work_file="$TEST_ROOT/work.json"
+  local bundle_file="$TEST_ROOT/bundle.json"
+  local output_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history.md"
+
+  cp "$FIXTURES_DIR/transcript-instruction-dump.jsonl" "$transcript"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$FIXED_CWD" "$output_path"
+  python3 "$ROOT_DIR/scripts/llm-history-context.py" "$work_file" > "$bundle_file"
+  "$WORKER_SCRIPT" "$work_file"
+
+  assert_file_exists "$output_path"
+  # None of the skill-paste's distinctive markers may appear in the rendered handoff.
+  if grep -E "SKILL\.md|YAML frontmatter|Supported Flags|Skill Contract|~/\.claude/skills/git-ops" "$output_path" >/dev/null; then
+    fail "instruction-dump content leaked into rendered handoff: $output_path"
+  fi
+  # The bundle must record the elision so downstream consumers can tell something was dropped.
+  assert_contains "$bundle_file" "instruction-dump elided"
+}
+
 scenario_first_save
 scenario_dedup
 scenario_resave_with_age_and_delta
@@ -275,5 +299,6 @@ scenario_empty_lock_bootstrap
 scenario_legacy_numeric_lock
 scenario_session_end_mode
 scenario_title_sanitation
+scenario_instruction_dump_elided
 
 echo "All smoke tests passed."
