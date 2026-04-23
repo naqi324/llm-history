@@ -2,18 +2,19 @@
 
 Reference documentation for the markdown files produced by the llm-history skill and hooks.
 
+Rendering is fully deterministic: `scripts/llm-history-worker.sh` builds the markdown from the grounded context bundle emitted by `scripts/llm-history-context.py`. No nested `claude -p` call is made.
+
 ## YAML Frontmatter Fields
 
 | Field          | Type   | Required | Description                                      |
 |----------------|--------|----------|--------------------------------------------------|
 | date           | date   | yes      | Session date (YYYY-MM-DD)                        |
 | saved_at       | string | yes      | ISO 8601 timestamp with timezone when saved       |
-| title          | string | yes      | Descriptive session title from grounded facts or model output |
-| model          | string | yes      | Renderer used for the save (model-backed or deterministic) |
-| project        | string | yes      | Project directory path (~ for home)              |
+| title          | string | yes      | Descriptive session title derived from grounded facts |
+| model          | string | yes      | Renderer label (`auto-saved (grounded deterministic)`) |
+| project        | string | yes      | Project directory path (`~` for home)            |
 | session_id     | string | no       | Claude Code session identifier                   |
 | session_name   | string | no       | Claude Code auto-assigned session name            |
-| context_usage  | string | no       | Approximate context window usage (manual only)   |
 | status         | string | yes      | completed, in-progress, or blocked               |
 | trigger        | string | yes      | What triggered the save: manual, Stop, PreCompact, or SessionEnd |
 | tags           | list   | yes      | 3-5 tags derived from session content            |
@@ -23,41 +24,26 @@ Reference documentation for the markdown files produced by the llm-history skill
 ### 1. Executive Summary
 2-4 sentences summarizing what was accomplished and the session's purpose.
 
-### 2. Key Decisions
-Bulleted list of significant decisions with rationale. Omit if no meaningful decisions were made.
-
-### 3. Working State
+### 2. Working State
 Exact current state grounded in transcript and repo facts: branch, cleanliness, checks run, what's done, what's partial, and what remains.
 
-### 4. Files Changed
-Bulleted list of concrete file paths touched in the session facts, each with what happened and why it matters.
+### 3. Files Changed
+Bulleted list of concrete file paths touched in the session facts. Only files actually edited or written appear; files only read for context are not listed as changed.
 
-### 5. Concrete Next Steps
+### 4. Concrete Next Steps
 Numbered list of specific, actionable items with exact commands, file paths, or checks. Always present.
 
-### 6. Key Decisions / Failed Approaches / Warnings
-Optional sections included only when the grounded facts support them.
+### 5. Failed Approaches
+Optional. Included only when the grounded facts show a real failure, blocker, or rejected path.
 
-## Worker Validation and Fallback
-
-- Structured Claude output must begin with `TITLE:`, `TAGS:`, and `STATUS:` on the first three lines.
-- Accepted `status` values are `completed`, `in-progress`, or `blocked`.
-- Model output is also rejected when it is low-value, including:
-  - generic/path-only titles
-  - generic-only tags when grounded facts exist
-  - missing `Executive Summary`, `Working State`, `Files Changed`, or `Concrete Next Steps`
-  - missing numbered next steps
-  - clarifying-question style prose
-  - omission of grounded file/command facts that the worker marked as required
-- `SessionEnd` saves are always rendered deterministically from the grounded context bundle so shutdown never depends on a nested Claude subprocess.
-- If the Claude subprocess returns malformed or low-value output in non-exit flows, the worker falls back to a deterministic grounded handoff built from the same context bundle.
+### 6. Warnings
+Optional. Included when the grounded facts record environment warnings, fragile assumptions, or probe errors.
 
 ## File Naming Convention
 
 - Format: `YYMMDD-<project>.md`
 - Project slug: derived from CWD basename (lowercase, kebab-case, max 25 chars)
 - Deduplication: append `-2`, `-3`, etc. for multiple saves on the same date with the same project
-- Descriptive task naming lives in the H1 heading and `title` frontmatter field
 - Examples:
   - `260320-llm-history.md`
   - `260319-browser.md`

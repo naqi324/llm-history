@@ -1,7 +1,0 @@
-TITLE: Investigate generic auto-save output
-TAGS: llm-history,investigation,quality
-STATUS: in-progress
-
-## Executive Summary
-
-Compared the weaker auto-saved files with the stronger manual handoffs and confirmed the quality gap.

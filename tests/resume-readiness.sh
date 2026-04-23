@@ -23,8 +23,6 @@ setup_env() {
   export LLM_HISTORY_LOCK_DIR="$TEST_ROOT/locks"
   export LLM_HISTORY_HOOK_LOGFILE="$TEST_ROOT/hook.log"
   export LLM_HISTORY_WORKER_LOGFILE="$TEST_ROOT/worker.log"
-  export LLM_HISTORY_CLAUDE_BIN="$FIXTURES_DIR/stub-claude.sh"
-  export LLM_HISTORY_TEST_CAPTURE_STDIN="$TEST_ROOT/claude-stdin.txt"
 }
 
 seed_project_tree() {
@@ -32,7 +30,6 @@ seed_project_tree() {
 
   mkdir -p "$root/scripts" "$root/references" "$root/notes"
   printf '%s\n' '# worker' > "$root/scripts/llm-history-worker.sh"
-  printf '%s\n' '# prompt' > "$root/references/prompt.md"
   printf '%s\n' '# orchestrator' > "$root/scripts/exit-orchestrator.sh"
   printf '%s\n' '# audit' > "$root/scripts/exit-audit.sh"
   printf '%s\n' '# research notes' > "$root/notes/research.md"
@@ -60,24 +57,19 @@ copy_quality_transcript() {
 run_and_score() {
   local scenario="$1"
   local fixture_transcript="$2"
-  local response_fixture="$3"
-  local project_root="$4"
-  local output_path="$5"
-  local session_id="$6"
-  local expected_log_snippet="${7:-}"
+  local project_root="$3"
+  local output_path="$4"
+  local session_id="$5"
   local bundle_path="$TEST_ROOT/${scenario}-bundle.json"
   local work_file="$TEST_ROOT/${scenario}-work.json"
   local report_path="$TEST_ROOT/${scenario}-report.json"
 
-  export LLM_HISTORY_TEST_CLAUDE_RESPONSE_FILE="$FIXTURES_DIR/${response_fixture}"
   build_worker_file "$work_file" "$session_id" "$fixture_transcript" "$project_root" "$output_path"
   python3 "$CONTEXT_SCRIPT" "$work_file" > "$bundle_path"
   "$WORKER_SCRIPT" "$work_file"
 
   assert_file_exists "$output_path"
-  if [ -n "$expected_log_snippet" ]; then
-    assert_contains "$LLM_HISTORY_WORKER_LOGFILE" "$expected_log_snippet"
-  fi
+  assert_contains "$output_path" "model: auto-saved (grounded deterministic)"
 
   python3 "$CHECKER_SCRIPT" "$output_path" "$bundle_path" "$scenario" > "$report_path" \
     || fail "resume-readiness evaluation failed for $scenario"
@@ -85,8 +77,8 @@ run_and_score() {
   SCENARIO_REPORTS+=("$report_path")
 }
 
-scenario_code_heavy_good() {
-  echo "Scenario 1: code-heavy dirty repo accepts grounded output"
+scenario_code_heavy() {
+  echo "Scenario 1: code-heavy dirty repo produces a grounded handoff"
   setup_env code-heavy
   local project_root="$TEST_ROOT/code-heavy-repo"
   local transcript="$TEST_ROOT/transcript-code-heavy.jsonl"
@@ -94,7 +86,6 @@ scenario_code_heavy_good() {
 
   init_git_repo "$project_root"
   printf '%s\n' '# worker updated' >> "$project_root/scripts/llm-history-worker.sh"
-  printf '%s\n' '# prompt updated' >> "$project_root/references/prompt.md"
   copy_quality_transcript "transcript-code-heavy.jsonl" "$transcript" "$project_root"
 
   local work_file="$TEST_ROOT/context-work.json"
@@ -105,17 +96,12 @@ scenario_code_heavy_good() {
   assert_jq '.tools.snapshot_files | index("scripts/llm-history-worker.sh") != null' "$TEST_ROOT/code-heavy-bundle.json"
   assert_jq '.tools.likely_checks | index("bash -n scripts/llm-history-worker.sh") != null' "$TEST_ROOT/code-heavy-bundle.json"
 
-  run_and_score "code-heavy-good" "$transcript" "claude-grounded-code.txt" "$project_root" "$output_path" \
+  run_and_score "code-heavy" "$transcript" "$project_root" "$output_path" \
     "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-
-  assert_contains "$LLM_HISTORY_TEST_CAPTURE_STDIN" "BEGIN SESSION FACTS"
-  assert_contains "$LLM_HISTORY_TEST_CAPTURE_STDIN" "BEGIN REPO FACTS"
-  assert_contains "$LLM_HISTORY_TEST_CAPTURE_STDIN" "BEGIN TOOL FACTS"
-  assert_contains "$LLM_HISTORY_TEST_CAPTURE_STDIN" "bash -n scripts/llm-history-worker.sh"
 }
 
-scenario_research_clean_missing_sections() {
-  echo "Scenario 2: clean research session rejects missing sections and uses fallback"
+scenario_research_clean() {
+  echo "Scenario 2: clean research session produces a grounded handoff"
   setup_env research-clean
   local project_root="$TEST_ROOT/research-clean-repo"
   local transcript="$TEST_ROOT/transcript-research-clean.jsonl"
@@ -129,12 +115,12 @@ scenario_research_clean_missing_sections() {
   python3 "$CONTEXT_SCRIPT" "$work_file" > "$bundle_path"
   assert_jq '.repo.status_clean == true' "$bundle_path"
 
-  run_and_score "research-clean-fallback" "$transcript" "claude-missing-sections.txt" "$project_root" "$output_path" \
-    "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" "missing heading: Working State"
+  run_and_score "research-clean" "$transcript" "$project_root" "$output_path" \
+    "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 }
 
-scenario_interrupted_generic_rejected() {
-  echo "Scenario 3: interrupted session rejects generic title and tags"
+scenario_interrupted() {
+  echo "Scenario 3: interrupted session still produces a grounded handoff"
   setup_env interrupted
   local project_root="$TEST_ROOT/interrupted-repo"
   local transcript="$TEST_ROOT/transcript-interrupted.jsonl"
@@ -144,12 +130,12 @@ scenario_interrupted_generic_rejected() {
   printf '%s\n' '# partial update' >> "$project_root/scripts/exit-orchestrator.sh"
   copy_quality_transcript "transcript-interrupted.jsonl" "$transcript" "$project_root"
 
-  run_and_score "interrupted-fallback" "$transcript" "claude-generic.txt" "$project_root" "$output_path" \
-    "cccccccc-cccc-cccc-cccc-cccccccccccc" "generic title"
+  run_and_score "interrupted" "$transcript" "$project_root" "$output_path" \
+    "cccccccc-cccc-cccc-cccc-cccccccccccc"
 }
 
-scenario_noop_clarifying_rejected() {
-  echo "Scenario 4: noop session rejects clarifying language and still renders a useful handoff"
+scenario_noop() {
+  echo "Scenario 4: noop session (no git repo) produces a grounded handoff"
   setup_env noop
   local project_root="$TEST_ROOT/noop-dir"
   local transcript="$TEST_ROOT/transcript-noop.jsonl"
@@ -163,12 +149,12 @@ scenario_noop_clarifying_rejected() {
   python3 "$CONTEXT_SCRIPT" "$work_file" > "$bundle_path"
   assert_jq '.repo.is_git == false' "$bundle_path"
 
-  run_and_score "noop-fallback" "$transcript" "claude-clarifying.txt" "$project_root" "$output_path" \
-    "dddddddd-dddd-dddd-dddd-dddddddddddd" "forbidden conversational language"
+  run_and_score "noop" "$transcript" "$project_root" "$output_path" \
+    "dddddddd-dddd-dddd-dddd-dddddddddddd"
 }
 
-scenario_git_heavy_good() {
-  echo "Scenario 5: git-heavy session accepts grounded output with command facts"
+scenario_git_heavy() {
+  echo "Scenario 5: git-heavy session produces a grounded handoff with command facts"
   setup_env git-heavy
   local project_root="$TEST_ROOT/git-heavy-repo"
   local transcript="$TEST_ROOT/transcript-git-heavy.jsonl"
@@ -184,7 +170,7 @@ scenario_git_heavy_good() {
   assert_jq '.tools.bash_commands | index("git push origin main") != null' "$bundle_path"
   assert_jq '.tools.likely_checks | index("gitleaks detect --no-banner -q") != null' "$bundle_path"
 
-  run_and_score "git-heavy-good" "$transcript" "claude-grounded-git.txt" "$project_root" "$output_path" \
+  run_and_score "git-heavy" "$transcript" "$project_root" "$output_path" \
     "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
 }
 
@@ -214,11 +200,11 @@ PY
   assert_jq '.passed == true' "$REPORT_DIR/last-resume-readiness-report.json"
 }
 
-scenario_code_heavy_good
-scenario_research_clean_missing_sections
-scenario_interrupted_generic_rejected
-scenario_noop_clarifying_rejected
-scenario_git_heavy_good
+scenario_code_heavy
+scenario_research_clean
+scenario_interrupted
+scenario_noop
+scenario_git_heavy
 write_aggregate_report
 
 echo "resume-readiness tests passed"

@@ -23,19 +23,15 @@ Use QMD MCP to search existing history files:
 Codex CLI has no hook system. Auto-save on session exit is NOT supported. Use manual save before ending important sessions.
 
 ## Session Context
-- Date: 2026-03-21
-- Work state: `SessionEnd` now stays git-first/history-last but renders history deterministically from grounded facts instead of invoking `claude -p` during shutdown, while non-exit flows keep the richer model-backed worker path.
-- Decisions:
-- The old parallel Claude `Stop` hooks for auto-git and `llm-history` were removed from `~/.claude/settings.json`.
-- `SessionEnd` is now the single authoritative exit path and uses a 240-second timeout.
-- `scripts/llm-history-save.sh` supports `LLM_HISTORY_SYNC=1` for synchronous SessionEnd execution while keeping async worker dispatch for non-exit flows.
-- `scripts/exit-orchestrator.sh` now passes `LLM_HISTORY_RENDER_MODE=session-end-sync` so exit-time history never nests a Claude subprocess during shutdown.
-- Auto-git and history scripts both write structured result files so the orchestrator can log `success`, `skip-*`, and `error` outcomes per phase.
-- `scripts/exit-audit.sh` now reports an `EXIT_SAFE` metric and flags any exit run missing `history` or `pipeline done`.
-- `tests/exit-orchestrator-smoke.sh` now hard-fails if `SessionEnd` tries to call `claude -p`, and covers trivial, missing-transcript, dedup, git-failure, and audit safety cases.
-- Added `scripts/llm-history-context.py` so the worker can extract grounded session/repo/tool facts instead of summarizing assistant prose alone.
-- The worker now rejects low-value model output (generic title/tags, missing sections, vague next steps, clarifying language, missing grounded facts) and renders a deterministic grounded fallback instead.
-- Added `tests/resume-readiness.sh`, `tests/check_resume_readiness.py`, and a five-scenario fixture corpus to score groundedness, specificity, and resumability.
-- Next steps:
-- If a real `/exit` still looks suspicious, inspect `/tmp/claude-exit-orchestrator.log` first or run `scripts/exit-audit.sh` and look for `EXIT_SAFE != safe`.
-- Keep `tests/smoke.sh`, `tests/resume-readiness.sh`, and `tests/exit-orchestrator-smoke.sh` in the verification loop for future hook/prompt changes.
+- Date: 2026-04-23
+- Work state: Rendering is deterministic in every path (SessionEnd, PreCompact, manual). The worker builds the handoff directly from the grounded context bundle produced by `scripts/llm-history-context.py`; no nested `claude -p` call.
+- Key properties:
+  - `SessionEnd` is the single authoritative exit path via `scripts/exit-orchestrator.sh` (git phase first, history phase second, 240-second budget).
+  - `scripts/llm-history-save.sh` supports `LLM_HISTORY_SYNC=1` for synchronous SessionEnd execution while keeping async worker dispatch for non-exit flows.
+  - `scripts/exit-audit.sh` reports an `EXIT_SAFE` metric and flags any exit run missing `history` or `pipeline done`.
+  - `scripts/llm-history-context.py` extracts grounded session/repo/tool facts from the transcript and probes the repo.
+- Verification:
+  - `tests/smoke.sh` covers dispatcher + worker plumbing, dedup/re-save/lock behavior, and the deterministic render output against goldens.
+  - `tests/resume-readiness.sh` runs the worker across five fixture transcripts and scores output with the resume-readiness rubric.
+  - `tests/exit-orchestrator-smoke.sh` covers ordered phase execution, git-failure isolation, audit reporting, and asserts the worker never shells out to `claude`.
+- If a real `/exit` looks suspicious, inspect `/tmp/claude-exit-orchestrator.log` first or run `scripts/exit-audit.sh` and look for `EXIT_SAFE != safe`.

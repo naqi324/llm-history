@@ -36,8 +36,6 @@ setup_env() {
   export LLM_HISTORY_LOCK_DIR="$TEST_ROOT/locks"
   export LLM_HISTORY_HOOK_LOGFILE="$TEST_ROOT/logs/history.log"
   export LLM_HISTORY_WORKER_LOGFILE="$TEST_ROOT/logs/worker.log"
-  export LLM_HISTORY_CLAUDE_BIN="$FIXTURES_DIR/stub-claude.sh"
-  export LLM_HISTORY_TEST_CLAUDE_RESPONSE_FILE="$FIXTURES_DIR/claude-valid.txt"
   export GIT_AUTHOR_NAME="Exit Smoke"
   export GIT_AUTHOR_EMAIL="exit-smoke@example.com"
   export GIT_COMMITTER_NAME="Exit Smoke"
@@ -49,15 +47,16 @@ exit 0
 EOF
   chmod +x "$TEST_ROOT/bin/gitleaks"
 
-  cat > "$TEST_ROOT/bin/forbidden-claude" <<EOF
+  cat > "$TEST_ROOT/bin/claude" <<EOF
 #!/usr/bin/env bash
-echo "invoked" >> "$TEST_ROOT/logs/claude-invoked.log"
+# If anything tries to invoke \`claude\`, record it. The deterministic worker
+# must never call the real binary.
+echo "invoked \$*" >> "$TEST_ROOT/logs/claude-invoked.log"
 exit 91
 EOF
-  chmod +x "$TEST_ROOT/bin/forbidden-claude"
+  chmod +x "$TEST_ROOT/bin/claude"
 
   export PATH="$TEST_ROOT/bin:$PATH"
-  export LLM_HISTORY_CLAUDE_BIN="$TEST_ROOT/bin/forbidden-claude"
 
   unset CLAUDE_EXIT_GIT_SCRIPT
   unset CLAUDE_EXIT_HISTORY_SCRIPT

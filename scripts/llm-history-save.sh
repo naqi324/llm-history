@@ -3,7 +3,7 @@
 # Called by PreCompact hooks directly and by the exit orchestrator for SessionEnd.
 # Receives hook JSON on stdin with session_id, transcript_path, cwd, etc.
 # This is the fast dispatcher — it runs guards and normally forks a detached worker
-# for the slow claude -p summarization. When LLM_HISTORY_SYNC=1, it runs inline.
+# that renders the handoff deterministically. When LLM_HISTORY_SYNC=1, it runs inline.
 
 set -euo pipefail
 # NOTE: pipefail means ALL command substitutions with jq/grep pipelines
