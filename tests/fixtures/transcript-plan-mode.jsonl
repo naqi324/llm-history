@@ -1,0 +1,10 @@
+{"type":"custom-title","customTitle":"plan-mode-fixture"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Please plan the refactor."}]}}
+{"type":"permission-mode","permissionMode":"plan"}
+{"type":"attachment","attachment":{"type":"plan_mode","planFilePath":"/Users/naqi.khan/.claude/plans/refactor-thing.md","planExists":true,"isSubAgent":false}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Started drafting the refactor plan and identified the key entry points."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Captured the migration strategy in the plan file."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Listed the files that will be touched in phase one."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Identified one open question about rollback semantics."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Paused the plan before user approval."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Next step is reviewing the plan with the user."}]}}

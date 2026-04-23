@@ -599,6 +599,45 @@ def build_file_lines(
     return lines
 
 
+def build_plan_state(
+    permission_mode_last: str,
+    plan_attachment: dict[str, Any] | None,
+    exit_plan_mode_called: bool,
+) -> dict[str, Any]:
+    in_plan_mode = permission_mode_last.lower() == "plan"
+    plan_file = ""
+    plan_exists = False
+    if plan_attachment:
+        plan_file = plan_attachment.get("plan_file") or ""
+        plan_exists = bool(plan_attachment.get("plan_exists"))
+    return {
+        "in_plan_mode": in_plan_mode,
+        "plan_file": plan_file,
+        "plan_exists": plan_exists,
+        "plan_finalized": bool(exit_plan_mode_called),
+    }
+
+
+def plan_note_lines(plan_state: dict[str, Any]) -> list[str]:
+    """Return working-state bullets describing plan-mode status (may be empty)."""
+    if not plan_state.get("in_plan_mode") and not plan_state.get("plan_finalized"):
+        return []
+    lines: list[str] = []
+    plan_file = plan_state.get("plan_file") or ""
+    if plan_state.get("in_plan_mode"):
+        if plan_file:
+            lines.append(
+                f"- **Paused in plan mode.** Plan file: `{plan_file}`. Read the plan before resuming."
+            )
+        else:
+            lines.append(
+                "- **Paused in plan mode.** No plan file recorded — check `~/.claude/plans/` for the active plan."
+            )
+    if plan_state.get("plan_finalized"):
+        lines.append("- Plan reviewed (ExitPlanMode called); resume with implementation.")
+    return lines
+
+
 def build_working_state_lines(repo: dict[str, Any], checks: list[str], touched_files: list[str]) -> list[str]:
     lines = []
     if repo.get("is_git"):
@@ -643,6 +682,9 @@ def main() -> int:
     tool_names: list[str] = []
     error_results: list[str] = []
     snapshot_files: list[str] = []
+    permission_mode_last = ""
+    plan_attachment: dict[str, Any] | None = None
+    exit_plan_mode_called = False
 
     with open(transcript_path, "r", encoding="utf-8") as handle:
         for raw_line in handle:
@@ -661,6 +703,19 @@ def main() -> int:
                 tracked = obj.get("snapshot", {}).get("trackedFileBackups", {})
                 if isinstance(tracked, dict):
                     snapshot_files.extend(normalize_path_value(path) for path in tracked.keys())
+
+            if obj.get("type") == "permission-mode":
+                mode = normalize_text(obj.get("permissionMode"))
+                if mode:
+                    permission_mode_last = mode
+
+            if obj.get("type") == "attachment":
+                attachment = obj.get("attachment") or {}
+                if isinstance(attachment, dict) and attachment.get("type") == "plan_mode":
+                    plan_attachment = {
+                        "plan_file": normalize_text(attachment.get("planFilePath")),
+                        "plan_exists": bool(attachment.get("planExists")),
+                    }
 
             for role, message in iter_message_blocks(obj):
                 content = message.get("content", [])
@@ -683,6 +738,8 @@ def main() -> int:
                     if item_type == "tool_use" and role == "assistant":
                         name = normalize_text(item.get("name"))
                         tool_names.append(name)
+                        if name == "ExitPlanMode":
+                            exit_plan_mode_called = True
                         payload = item.get("input", {})
                         if not isinstance(payload, dict):
                             continue
@@ -726,8 +783,10 @@ def main() -> int:
     fallback_status = derive_status(repo, failures, assistant_texts)
     grounded_tags = derive_tags(project_slug, touched_files, bash_commands, repo)
     fallback_title = derive_title(project_slug, recent_user_asks, assistant_milestones)
+    plan_state = build_plan_state(permission_mode_last, plan_attachment, exit_plan_mode_called)
     repo_root = repo.get("repo_root") or ""
     display_touched = [display_path(path, repo_root or None) for path in touched_files]
+    working_state_lines = plan_note_lines(plan_state) + build_working_state_lines(repo, checks, display_touched)
 
     bundle = {
         "session": {
@@ -760,12 +819,13 @@ def main() -> int:
             "grounded_tags": grounded_tags,
             "fallback_title": fallback_title,
             "fallback_status": fallback_status,
+            "plan_state": plan_state,
             "summary_sentences": [
                 summarize_task(last_user_ask, project_dir, normalize_text(work.get("hook_event"))),
                 summarize_progress(assistant_milestones, display_touched, bash_commands),
                 summarize_remaining(fallback_status, repo, failures),
             ],
-            "working_state_lines": build_working_state_lines(repo, checks, display_touched),
+            "working_state_lines": working_state_lines,
             "files_changed_lines": build_file_lines(repo_root, read_files, edit_files + write_files, snapshot_files),
             "next_steps": build_next_steps(repo, display_touched, checks, failures, project_dir),
             "failed_lines": [f"- {line}" for line in failures[:4]],

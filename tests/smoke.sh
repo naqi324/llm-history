@@ -294,6 +294,29 @@ scenario_instruction_dump_elided() {
   assert_contains "$bundle_file" "instruction-dump elided"
 }
 
+scenario_plan_mode_surface() {
+  echo "Scenario 9: plan-mode sessions surface the plan file path in the handoff"
+  setup_env plan-mode
+
+  local transcript="$TEST_ROOT/transcript-plan-mode.jsonl"
+  local session_id="aaaaaaa9-0000-0000-0000-000000000009"
+  local work_file="$TEST_ROOT/work.json"
+  local bundle_file="$TEST_ROOT/bundle.json"
+  local output_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history.md"
+
+  cp "$FIXTURES_DIR/transcript-plan-mode.jsonl" "$transcript"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$FIXED_CWD" "$output_path"
+  python3 "$ROOT_DIR/scripts/llm-history-context.py" "$work_file" > "$bundle_file"
+  "$WORKER_SCRIPT" "$work_file"
+
+  assert_jq '.derived.plan_state.in_plan_mode == true' "$bundle_file"
+  assert_jq '.derived.plan_state.plan_file == "/Users/naqi.khan/.claude/plans/refactor-thing.md"' "$bundle_file"
+  assert_jq '.derived.plan_state.plan_exists == true' "$bundle_file"
+  assert_jq '.derived.plan_state.plan_finalized == false' "$bundle_file"
+  assert_contains "$output_path" "Paused in plan mode"
+  assert_contains "$output_path" "/Users/naqi.khan/.claude/plans/refactor-thing.md"
+}
+
 scenario_first_save
 scenario_dedup
 scenario_resave_with_age_and_delta
@@ -302,5 +325,6 @@ scenario_legacy_numeric_lock
 scenario_session_end_mode
 scenario_title_sanitation
 scenario_instruction_dump_elided
+scenario_plan_mode_surface
 
 echo "All smoke tests passed."
