@@ -4,3 +4,22 @@ __pycache__/
 .env*
 *.skill
 tests/logs/*.json
+
+# Added by git-ops
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+token.json
+*secret*
+*credential*
+.htpasswd
+.netrc
+.claude/local-context.md
+.state/
+!.state/.gitignore
+!.state/progress.md
