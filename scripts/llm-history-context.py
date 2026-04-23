@@ -563,21 +563,39 @@ def build_file_lines(
     edited_files: list[str],
     snapshot_files: list[str],
 ) -> list[str]:
-    lines = []
-    ordered_paths = []
-    for path in edited_files + snapshot_files + read_files:
-        if path not in ordered_paths:
-            ordered_paths.append(path)
+    """Render the Files Changed body for the deterministic handoff.
 
-    for path in ordered_paths[:6]:
-        display = display_path(path, repo_root or None)
-        if path in edited_files or path in snapshot_files:
-            detail = "edited during the session and captured in the grounded context."
-        else:
-            detail = "read during the session for context."
-        lines.append(f"- `{display}` — {detail}")
-    if not lines:
-        lines.append("- No concrete file paths were recorded in the session facts.")
+    Canonical "changed" = edit/write tool calls plus any snapshot path that
+    the session actually edited. Files that were only read are never listed as
+    changed -- doing so was the root cause of misleading vault entries like
+    "scripts/foo.py — edited during the session" when foo.py was read-only.
+    """
+    snapshot_set = set(snapshot_files)
+    edited_set = set(edited_files)
+    changed: list[str] = []
+    for path in edited_files:
+        if path not in changed:
+            changed.append(path)
+    for path in snapshot_files:
+        if path in edited_set and path not in changed:
+            changed.append(path)
+
+    lines: list[str] = []
+    if changed:
+        for path in changed[:10]:
+            display = display_path(path, repo_root or None)
+            lines.append(f"- `{display}` — edited during the session.")
+        return lines
+
+    untouched_snapshots = [path for path in snapshot_files if path not in edited_set]
+    if untouched_snapshots:
+        lines.append(
+            f"- None edited this session; the file-history snapshot recorded "
+            f"{len(untouched_snapshots)} tracked file(s) from prior edits."
+        )
+        return lines
+
+    lines.append("- None recorded in this session.")
     return lines
 
 

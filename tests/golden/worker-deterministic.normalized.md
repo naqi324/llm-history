@@ -27,7 +27,7 @@ The session focused on: Please add tests. Recent progress: Next step is verifyin
 
 ## Files Changed
 
-- No concrete file paths were recorded in the session facts.
+- None recorded in this session.
 
 ## Concrete Next Steps
 

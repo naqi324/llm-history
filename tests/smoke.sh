@@ -124,6 +124,7 @@ scenario_first_save() {
   assert_contains "$output_path" "model: auto-saved (grounded deterministic)"
   assert_contains "$lock_path" "saved_at_epoch="
   assert_contains "$lock_path" "transcript_lines=12"
+  assert_forbidden_file_path_language_absent "$output_path"
   compare_to_golden "$output_path" "$GOLDEN_DIR/worker-deterministic.normalized.md"
 }
 
@@ -234,6 +235,7 @@ scenario_session_end_mode() {
   assert_file_exists "$output_path"
   assert_contains "$output_path" "model: auto-saved (grounded deterministic)"
   assert_contains "$LLM_HISTORY_WORKER_LOGFILE" "render_mode=session-end-sync"
+  assert_forbidden_file_path_language_absent "$output_path"
   compare_to_golden "$output_path" "$GOLDEN_DIR/worker-deterministic.normalized.md"
 }
 
