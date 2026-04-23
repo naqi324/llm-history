@@ -23,6 +23,28 @@ FORBIDDEN_PATTERNS = (
     "please let me know what you'd like",
 )
 
+# Historical bad-pattern from v1 that our new extractor must never emit.
+FORBIDDEN_FILES_CHANGED_STRING = "No concrete file paths were recorded"
+
+# Phrases we refuse to accept as step 1. Matches _GENERIC_NEXT_STEP_DENY
+# in scripts/llm-history-context.py.
+DENIED_STEP_ONE_PATTERNS = (
+    re.compile(r"^run `git status\b[^`]*`\.?\s*$", re.IGNORECASE),
+    re.compile(r"^review the code\.?\s*$", re.IGNORECASE),
+    re.compile(r"^continue the work\.?\s*$", re.IGNORECASE),
+    re.compile(r"^open the file\.?\s*$", re.IGNORECASE),
+    re.compile(r"^continue\.?\s*$", re.IGNORECASE),
+)
+
+# Minimum expected-concreteness for step 1: must contain a file path
+# (contains a '/' or a dotted file extension) OR a backticked command.
+STEP_ONE_HAS_PATH = re.compile(r"[/\\]|`[^`]*`")
+
+# Instruction-dump signal at the body level: we reject output where any body
+# section has 20+ consecutive lines that look like markdown headers. This is
+# independent of the context.py extractor check -- it's a final safety net.
+INSTRUCTION_LINE = re.compile(r"^\s*(#{1,6}\s|[-*]\s|\d+\.\s|\*\*[^*]+\*\*:)")
+
 
 def extract_frontmatter(text: str) -> dict[str, object]:
     lines = text.splitlines()
@@ -77,6 +99,48 @@ def is_generic_title(title: str) -> bool:
     )
 
 
+def is_malformed_title(title: str) -> bool:
+    """Phase 1.2 rules: reject titles that escaped sanitize_title_text."""
+    if not title:
+        return True
+    if "\n" in title:
+        return True
+    if title.startswith("#"):
+        return True
+    if len(title) > 80:
+        return True
+    if title.startswith("/") or title.startswith("~/"):
+        return True
+    return False
+
+
+def has_instruction_dump_section(text: str) -> bool:
+    """Return True if any body span contains 20+ consecutive instruction-shaped lines."""
+    run = 0
+    for line in text.splitlines():
+        if INSTRUCTION_LINE.match(line):
+            run += 1
+            if run >= 20:
+                return True
+        elif line.strip():
+            run = 0
+    return False
+
+
+def step_one_is_denied(step_text: str) -> bool:
+    cleaned = step_text.strip("- ").strip()
+    return any(pattern.match(cleaned) for pattern in DENIED_STEP_ONE_PATTERNS)
+
+
+def first_numbered_step(text: str) -> str:
+    section = section_body(text, "Concrete Next Steps")
+    for line in section.splitlines():
+        match = re.match(r"^\s*1\.\s+(.+)$", line)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print("Usage: check_resume_readiness.py <markdown> <bundle-json> <scenario>", file=sys.stderr)
@@ -98,6 +162,9 @@ def main() -> int:
     if is_generic_title(title):
       failures.append("generic_title")
 
+    if is_malformed_title(title):
+        failures.append("malformed_title")
+
     meaningful = [tag for tag in tags if tag not in GENERIC_TAGS]
     if not meaningful:
         failures.append("generic_tags")
@@ -112,6 +179,20 @@ def main() -> int:
 
     if any(pattern in lowered_text for pattern in FORBIDDEN_PATTERNS):
         failures.append("forbidden_clarifying_language")
+
+    files_changed_body = section_body(text, "Files Changed")
+    if FORBIDDEN_FILES_CHANGED_STRING in files_changed_body:
+        failures.append("forbidden_files_changed_string")
+
+    step_one = first_numbered_step(text)
+    if step_one:
+        if step_one_is_denied(step_one):
+            failures.append("denied_step_one")
+        if not STEP_ONE_HAS_PATH.search(step_one):
+            failures.append("step_one_not_concrete")
+
+    if has_instruction_dump_section(text):
+        failures.append("instruction_dump_in_body")
 
     required_files = bundle.get("derived", {}).get("required_file_mentions", [])
     if required_files:
