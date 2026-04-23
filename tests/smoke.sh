@@ -339,6 +339,54 @@ scenario_edit_then_error() {
   assert_jq '.derived.next_steps[0] | test("src/auth\\.py")' "$bundle_file"
 }
 
+scenario_render_failure_emergency() {
+  echo "Scenario 12: renderer failure writes an emergency dump instead of losing the session"
+  setup_env emergency
+
+  local transcript="$TEST_ROOT/transcript.jsonl"
+  local session_id="ffffffff-0000-0000-0000-00000000abcd"
+  local work_file="$TEST_ROOT/work.json"
+  local output_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history.md"
+
+  copy_transcript_fixture "$transcript"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$FIXED_CWD" "$output_path"
+
+  # Substitute a helper that always exits 1 before producing any output. The
+  # worker's failure handler must still land an emergency file and set the
+  # result file accordingly.
+  local broken_helper="$TEST_ROOT/broken-context.py"
+  cat > "$broken_helper" <<'PY'
+#!/usr/bin/env python3
+import sys
+sys.stderr.write("simulated context.py failure\n")
+sys.exit(99)
+PY
+  chmod +x "$broken_helper"
+
+  local result_file="$TEST_ROOT/result.kv"
+  rm -f "$result_file"
+
+  local emergency_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history-EMERGENCY-${session_id:0:8}.md"
+
+  if LLM_HISTORY_CONTEXT_HELPER="$broken_helper" \
+     LLM_HISTORY_RESULT_FILE="$result_file" \
+     LLM_HISTORY_RENDER_MODE=session-end-sync \
+     "$WORKER_SCRIPT" "$work_file"; then
+    fail "worker should exit non-zero when context helper fails"
+  fi
+
+  assert_file_exists "$emergency_path"
+  assert_contains "$emergency_path" "Emergency Context Dump"
+  assert_contains "$emergency_path" "trigger: session-end-emergency"
+  assert_contains "$emergency_path" "failed_stage: context-bundle"
+  assert_contains "$result_file" "result=error"
+  assert_contains "$result_file" "detail=render-failed-context-bundle"
+  assert_contains "$result_file" "file_path=$emergency_path"
+  assert_contains "$LLM_HISTORY_WORKER_LOGFILE" "FAIL session="
+  # No normal handoff file should exist, since we refused to write one.
+  assert_not_exists "$output_path"
+}
+
 scenario_generic_step_rejected() {
   echo "Scenario 11: denied generic step never becomes step 1"
   setup_env generic-rejected
@@ -371,5 +419,6 @@ scenario_instruction_dump_elided
 scenario_plan_mode_surface
 scenario_edit_then_error
 scenario_generic_step_rejected
+scenario_render_failure_emergency
 
 echo "All smoke tests passed."
