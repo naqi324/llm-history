@@ -11,6 +11,7 @@ Session context preservation skill for Claude Code. Saves structured markdown fi
 - `scripts/llm-history-context.py` — Grounded context extraction from transcript facts + lightweight repo probes
 - `scripts/exit-orchestrator.sh` — Authoritative `/exit` pipeline (git phase, then history phase)
 - `scripts/exit-audit.sh` — Summarizes recent orchestrated exit outcomes and flags missing history/pipeline completion
+- `scripts/llm-history-audit.sh` — Scores recent vault files against the resume-readiness rubric; used as the Phase 1 -> Phase 2 gate (fail rate must be <= 10% before starting Phase 2)
 - `references/template.md` — Output format documentation
 - `tests/smoke.sh` — Temp-dir regression harness for dispatcher + worker behavior
 - `tests/exit-orchestrator-smoke.sh` — Temp-dir regression harness for ordered SessionEnd exit behavior
