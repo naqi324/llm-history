@@ -95,6 +95,11 @@ else
   TAGS_YAML=$(jq -r '.derived.grounded_tags | map("  - " + .) | join("\n")' "$CONTEXT_FILE")
 fi
 
+# Belt-and-suspenders title sanitation in case a future code path skips
+# sanitize_title_text in context.py: drop everything from the first newline,
+# strip leading '#', and cap at 80 chars. sanitize_title_text handles the
+# expressive rules (fences, absolute-path rejection, fallbacks).
+TITLE=$(printf '%s' "$TITLE" | awk 'NR==1 {sub(/^[[:space:]]*#+[[:space:]]*/, ""); print; exit}' | cut -c1-80)
 TITLE_YAML=$(echo "$TITLE" | sed "s/'/''/g")
 
 # --- Write the output file ---

@@ -319,24 +319,91 @@ def derive_status(repo: dict[str, Any], failures: list[str], assistant_texts: li
     return "in-progress"
 
 
+TITLE_IMPERATIVE_PREFIX = re.compile(
+    r"^(please|can you|could you|help me|i need you to|need to)\s+",
+    flags=re.IGNORECASE,
+)
+TITLE_FENCE_PATTERN = re.compile(r"```")
+TITLE_LEADING_HEADING = re.compile(r"^#{1,6}\s*")
+TITLE_TRAILING_COLON = re.compile(r":\s*$")
+
+
+def _title_fallback(project_slug: str, last_user_ask: str) -> str:
+    """Deterministic fallback when the derived title can't be trusted."""
+    short = sanitize_title_text(last_user_ask, project_slug, allow_fallback=False)
+    if short:
+        return f"Session on {project_slug} — {short[:40]}".rstrip(" —")
+    return f"Session on {project_slug}"
+
+
+def sanitize_title_text(text: str, project_slug: str, *, allow_fallback: bool = True) -> str:
+    """Produce a safe, short title string.
+
+    Rules (from Phase 1.2 of the handoff redesign):
+    - Discard everything after the first newline.
+    - Strip leading markdown heading (`#`, `##`, ...) and surrounding whitespace.
+    - Reject any text containing a triple-backtick fence.
+    - Reject absolute-path-prefixed text longer than 40 chars after the prefix.
+    - Hard cap at 80 chars, truncating at the last word boundary (no ellipsis).
+    - Reject empty output, trailing colons, or output equal to the project slug.
+
+    On rejection (when ``allow_fallback`` is True), returns an empty string so
+    the caller can substitute its own fallback. When ``allow_fallback`` is
+    False (used inside the fallback itself), empty return is still signalled
+    with the empty string but callers are expected to have already supplied a
+    deterministic backup.
+    """
+    if not text:
+        return "" if allow_fallback else ""
+
+    first_line = text.split("\n", 1)[0]
+    stripped = first_line.strip()
+    if not stripped:
+        return ""
+
+    stripped = TITLE_LEADING_HEADING.sub("", stripped).strip()
+    if TITLE_FENCE_PATTERN.search(stripped):
+        return ""
+    stripped = stripped.strip("`").strip()
+
+    if stripped.startswith("/") or stripped.startswith("~/"):
+        path_tail = stripped[1:] if stripped.startswith("/") else stripped[2:]
+        if len(path_tail) > 40:
+            return ""
+
+    if len(stripped) > 80:
+        truncated = stripped[:80]
+        cut = truncated.rfind(" ")
+        stripped = truncated[:cut].rstrip() if cut > 40 else truncated.rstrip()
+
+    stripped = TITLE_TRAILING_COLON.sub("", stripped).rstrip()
+
+    if not stripped:
+        return ""
+    if stripped.lower() == project_slug.lower():
+        return ""
+    if stripped.lower().endswith(" session"):
+        return ""
+
+    return stripped
+
+
 def derive_title(project_slug: str, user_asks: list[str], assistant_texts: list[str]) -> str:
     candidates = user_asks[::-1] + assistant_texts[::-1]
+    last_user_ask = user_asks[-1] if user_asks else ""
     for text in candidates:
         cleaned = normalize_text(text)
         if not cleaned:
             continue
-        cleaned = re.sub(r"^(please|can you|could you|help me|i need you to|need to)\s+", "", cleaned, flags=re.I)
+        cleaned = TITLE_IMPERATIVE_PREFIX.sub("", cleaned)
         cleaned = cleaned.strip(".!?")
-        cleaned = cleaned.replace("`", "")
-        if cleaned.lower().endswith(" session"):
+        sanitized = sanitize_title_text(cleaned, project_slug)
+        if not sanitized:
             continue
-        if cleaned.startswith("~/") or cleaned.startswith("/"):
+        if len(sanitized.split()) < 3:
             continue
-        words = cleaned.split()
-        if len(words) >= 3:
-            titled = cleaned[:100]
-            return titled[0].upper() + titled[1:]
-    return f"Progress on {project_slug} work"
+        return sanitized[0].upper() + sanitized[1:]
+    return _title_fallback(project_slug, last_user_ask)
 
 
 def summarize_task(last_user_ask: str, project_dir: str, trigger: str) -> str:

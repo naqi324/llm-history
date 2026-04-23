@@ -1,0 +1,10 @@
+{"type":"custom-title","customTitle":"title-corruption-fixture"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"## Base directory for this skill: /Users/naqi.khan/.claude/skills/git-ops\n\n# Git-Ops -- End-of-Session Git Operations\n\n## Critical Rules\n\n1. Always commit before exit."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Opened the git-ops skill and began reviewing the workflow steps."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Please update the Gotchas section."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Edited the Gotchas section to add the merge-conflict clarification."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Ran the skill's internal smoke test."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Noted the remaining work: rerun the validation harness."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Committed the current state."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Session paused before the harness completed."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Next step is running tests/resume-readiness.sh and reviewing the report."}]}}

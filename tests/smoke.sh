@@ -237,11 +237,43 @@ scenario_session_end_mode() {
   compare_to_golden "$output_path" "$GOLDEN_DIR/worker-deterministic.normalized.md"
 }
 
+scenario_title_sanitation() {
+  echo "Scenario 7: pasted skill content does not land in title/headline"
+  setup_env title-sanitation
+
+  local transcript="$TEST_ROOT/transcript-title-corruption.jsonl"
+  local session_id="77777777-7777-7777-7777-777777777777"
+  local work_file="$TEST_ROOT/work.json"
+  local output_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history.md"
+
+  cp "$FIXTURES_DIR/transcript-title-corruption.jsonl" "$transcript"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$FIXED_CWD" "$output_path"
+  "$WORKER_SCRIPT" "$work_file"
+
+  local title_line
+  title_line=$(grep '^title:' "$output_path")
+  if grep -F '/Users/naqi.khan/.claude/skills/git-ops' "$output_path" >/dev/null; then
+    if printf '%s\n' "$title_line" | grep -F '/Users/naqi.khan/.claude/skills/git-ops' >/dev/null; then
+      fail "title leaked skill path: $title_line"
+    fi
+  fi
+  if printf '%s\n' "$title_line" | grep -E "^title: '?#" >/dev/null; then
+    fail "title starts with markdown header: $title_line"
+  fi
+  local title_value
+  title_value=$(printf '%s' "$title_line" | sed -E "s/^title: '?(.*)'?$/\1/" | sed "s/'$//")
+  local title_len=${#title_value}
+  if [ "$title_len" -gt 80 ]; then
+    fail "title exceeds 80 chars ($title_len): $title_line"
+  fi
+}
+
 scenario_first_save
 scenario_dedup
 scenario_resave_with_age_and_delta
 scenario_empty_lock_bootstrap
 scenario_legacy_numeric_lock
 scenario_session_end_mode
+scenario_title_sanitation
 
 echo "All smoke tests passed."
