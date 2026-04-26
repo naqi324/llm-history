@@ -1,4 +1,0 @@
-# Ignore all working files except progress log
-*
-!.gitignore
-!progress.md

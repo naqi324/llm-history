@@ -30,25 +30,26 @@ trap cleanup EXIT
 
 build_fallback_summary() {
   jq -r '
-    def paragraph(items): items | map(select(length > 0)) | join(" ");
-    def bullets(items): if (items | length) == 0 then "- unknown" else items | join("\n") end;
-    def numbered(items): if (items | length) == 0 then "1. Review the grounded session facts and continue from the latest recorded state." else items | to_entries | map("\(.key + 1). \(.value)") | join("\n") end;
-    "## Executive Summary\n\n"
-    + paragraph(.derived.summary_sentences)
-    + "\n\n## Working State\n\n"
-    + bullets(.derived.working_state_lines)
-    + "\n\n## Files Changed\n\n"
-    + bullets(.derived.files_changed_lines)
-    + "\n\n## Concrete Next Steps\n\n"
-    + numbered(.derived.next_steps)
-    + (if (.derived.failed_lines | length) > 0
-        then "\n\n## Failed Approaches\n\n" + bullets(.derived.failed_lines)
-        else ""
-       end)
-    + (if (.derived.warning_lines | length) > 0
-        then "\n\n## Warnings\n\n" + bullets(.derived.warning_lines)
-        else ""
-       end)
+    def bullets(items): if ((items // []) | length) == 0 then "- None captured." else (items | join("\n")) end;
+    "## Resume Snapshot\n\n"
+    + bullets(.resume_packet.snapshot_lines)
+    + "\n\n## Task Ledger\n\n"
+    + "### DONE\n\n"
+    + bullets(.resume_packet.task_ledger.done)
+    + "\n\n### PARTIALLY DONE\n\n"
+    + bullets(.resume_packet.task_ledger.partial)
+    + "\n\n### NOT DONE\n\n"
+    + bullets(.resume_packet.task_ledger.not_done)
+    + "\n\n## Workspace Truth\n\n"
+    + bullets(.resume_packet.workspace_truth_lines)
+    + "\n\n## Decisions And Rationale\n\n"
+    + bullets(.resume_packet.decision_lines)
+    + "\n\n## Validation Evidence\n\n"
+    + bullets(.resume_packet.validation_lines)
+    + "\n\n## Risks, Blockers, And Unknowns\n\n"
+    + bullets(.resume_packet.risk_lines)
+    + "\n\n## Do Not Redo\n\n"
+    + bullets(.resume_packet.do_not_redo_lines)
   ' "$CONTEXT_FILE"
 }
 

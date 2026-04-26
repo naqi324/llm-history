@@ -339,8 +339,50 @@ scenario_edit_then_error() {
   assert_jq '.derived.next_steps[0] | test("src/auth\\.py")' "$bundle_file"
 }
 
+scenario_todo_ledger() {
+  echo "Scenario 11: TodoWrite state renders a classified task ledger"
+  setup_env todo-ledger
+
+  local transcript="$TEST_ROOT/transcript-todo-ledger.jsonl"
+  local session_id="ddddddd0-0000-0000-0000-0000000000d0"
+  local work_file="$TEST_ROOT/work.json"
+  local bundle_file="$TEST_ROOT/bundle.json"
+  local output_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history.md"
+
+  cp "$FIXTURES_DIR/transcript-todo-ledger.jsonl" "$transcript"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$FIXED_CWD" "$output_path"
+  python3 "$ROOT_DIR/scripts/llm-history-context.py" "$work_file" > "$bundle_file"
+  "$WORKER_SCRIPT" "$work_file"
+
+  assert_jq '.tools.todo_items | length == 3' "$bundle_file"
+  assert_contains "$output_path" "### DONE"
+  assert_contains "$output_path" "Define resume packet sections"
+  assert_contains "$output_path" "### PARTIALLY DONE"
+  assert_contains "$output_path" "Wire renderer to resume_packet"
+  assert_contains "$output_path" "### NOT DONE"
+  assert_contains "$output_path" "Regenerate deterministic goldens"
+}
+
+scenario_completed_clean_status() {
+  echo "Scenario 12: clean completed sessions surface completed status and do-not-redo guidance"
+  setup_env completed-clean
+
+  local transcript="$TEST_ROOT/transcript-completed-clean.jsonl"
+  local session_id="eeeeeee0-0000-0000-0000-0000000000e0"
+  local work_file="$TEST_ROOT/work.json"
+  local output_path="$LLM_HISTORY_VAULT_DIR/${TODAY_YYMMDD}-llm-history.md"
+
+  cp "$FIXTURES_DIR/transcript-completed-clean.jsonl" "$transcript"
+  build_worker_file "$work_file" "$session_id" "$transcript" "$FIXED_CWD" "$output_path"
+  "$WORKER_SCRIPT" "$work_file"
+
+  assert_contains "$output_path" "status: completed"
+  assert_contains "$output_path" "Committed docs cleanup and pushed to origin/main."
+  assert_contains "$output_path" "Do not redo completed work"
+}
+
 scenario_render_failure_emergency() {
-  echo "Scenario 12: renderer failure writes an emergency dump instead of losing the session"
+  echo "Scenario 14: renderer failure writes an emergency dump instead of losing the session"
   setup_env emergency
 
   local transcript="$TEST_ROOT/transcript.jsonl"
@@ -388,7 +430,7 @@ PY
 }
 
 scenario_generic_step_rejected() {
-  echo "Scenario 11: denied generic step never becomes step 1"
+  echo "Scenario 13: denied generic step never becomes step 1"
   setup_env generic-rejected
 
   local transcript="$TEST_ROOT/transcript.jsonl"
@@ -418,6 +460,8 @@ scenario_title_sanitation
 scenario_instruction_dump_elided
 scenario_plan_mode_surface
 scenario_edit_then_error
+scenario_todo_ledger
+scenario_completed_clean_status
 scenario_generic_step_rejected
 scenario_render_failure_emergency
 

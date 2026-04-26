@@ -51,6 +51,34 @@ FAILURE_PATTERNS = (
     "warn",
 )
 
+CHECKBOX_PATTERN = re.compile(
+    r"(?m)^\s*[-*]\s+\[(?P<mark>[ xX~-])\]\s+(?P<text>.+?)\s*$"
+)
+
+DECISION_PATTERNS = (
+    re.compile(r"\b(chose|chosen|choose|decided|decision|prefer|preferred)\b", re.IGNORECASE),
+    re.compile(r"\b(keep|use|preserve|switch|switched|replace|replaced)\b.+\bover\b", re.IGNORECASE),
+    re.compile(r"\*\*[^*]+\*\*\s+over\s+", re.IGNORECASE),
+)
+
+COMPLETION_PATTERNS = (
+    re.compile(r"^(added|implemented|updated|fixed|hardened|switched|replaced|removed|committed|pushed|validated|verified)\b", re.IGNORECASE),
+    re.compile(r"\b(done|completed|committed|pushed|validated|verified|passes|passed)\b", re.IGNORECASE),
+)
+
+RUNTIME_COMMAND_PATTERNS = (
+    "localhost",
+    "127.0.0.1",
+    "curl",
+    "npm run dev",
+    "pnpm dev",
+    "yarn dev",
+    "uvicorn",
+    "python -m http.server",
+    "serve",
+    "docker compose",
+)
+
 
 def load_json(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as handle:
@@ -122,7 +150,7 @@ def normalize_text(value: Any) -> str:
 # --- Instruction-dump detection (Phase 1.3) ---
 #
 # The renderer previously let large verbatim skill-file blocks leak from the
-# assistant narrative into the Executive Summary because the model faithfully
+# assistant narrative into the handoff because the model faithfully
 # repeated whatever the transcript fed it. Guard at the extractor layer: if a
 # text block looks like a pasted skill definition (or a similar instructional
 # blob), replace it with an elision note *before* it enters the context bundle.
@@ -425,6 +453,9 @@ def derive_status(repo: dict[str, Any], failures: list[str], assistant_texts: li
     combined = " ".join(text.lower() for text in assistant_texts[-6:])
     if failures and any(token in combined for token in ("blocked", "stuck", "unable", "can't", "cannot")):
         return "blocked"
+    if repo.get("is_git") and repo.get("status_clean") and not failures:
+        if any(token in combined for token in ("done", "completed", "committed", "pushed", "validated", "verified", "no action needed", "all clear")):
+            return "completed"
     return "in-progress"
 
 
@@ -619,11 +650,11 @@ def build_next_steps(
         if failing_command:
             steps.append(
                 f"Re-run `{failing_command}` to reproduce the error in `{edit_display}`, "
-                f"then resolve the failure recorded under Failed Approaches."
+                f"then resolve the failure recorded under Risks, Blockers, And Unknowns."
             )
         else:
             steps.append(
-                f"Open `{edit_display}` and fix the error recorded under Failed Approaches; "
+                f"Open `{edit_display}` and fix the error recorded under Risks, Blockers, And Unknowns; "
                 f"there is no captured check command to re-run."
             )
 
@@ -644,13 +675,13 @@ def build_next_steps(
     if not steps:
         steps.append(
             f"Re-open the project at `{project_dir}` and continue from the latest milestone "
-            f"in the Executive Summary above."
+            f"in the Resume Snapshot above."
         )
 
     if steps and _is_denied_step(steps[0]):
         steps[0] = (
             f"Re-open the project at `{project_dir}` and continue from the latest milestone "
-            f"in the Executive Summary above."
+            f"in the Resume Snapshot above."
         )
 
     # Step 2: always a verification.
@@ -667,7 +698,7 @@ def build_next_steps(
         steps.append(verify_step)
 
     # Optional step 3: an outstanding failure to chase down, if not already the driver of step 1.
-    if failures and "Failed Approaches" not in (steps[0] or ""):
+    if failures and "Risks, Blockers" not in (steps[0] or ""):
         steps.append(f"Reproduce and resolve the recorded failure: {failures[0]}")
 
     return dedupe(steps, limit=3)
@@ -679,7 +710,7 @@ def build_file_lines(
     edited_files: list[str],
     snapshot_files: list[str],
 ) -> list[str]:
-    """Render the Files Changed body for the deterministic handoff.
+    """Render changed-file facts for the deterministic handoff.
 
     Canonical "changed" = edit/write tool calls plus any snapshot path that
     the session actually edited. Files that were only read are never listed as
@@ -706,12 +737,12 @@ def build_file_lines(
     untouched_snapshots = [path for path in snapshot_files if path not in edited_set]
     if untouched_snapshots:
         lines.append(
-            f"- None edited this session; the file-history snapshot recorded "
+            f"- Changed files: none edited this session; the file-history snapshot recorded "
             f"{len(untouched_snapshots)} tracked file(s) from prior edits."
         )
         return lines
 
-    lines.append("- None recorded in this session.")
+    lines.append("- Changed files: none recorded in this session.")
     return lines
 
 
@@ -776,6 +807,358 @@ def build_working_state_lines(repo: dict[str, Any], checks: list[str], touched_f
     return lines
 
 
+def split_sentences(text: str) -> list[str]:
+    """Split normalized text into short candidate facts without over-parsing prose."""
+    if not text:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return [part.strip(" -") for part in parts if part.strip(" -")]
+
+
+def parse_checklist_tasks(text: str) -> list[dict[str, str]]:
+    tasks: list[dict[str, str]] = []
+    for match in CHECKBOX_PATTERN.finditer(text or ""):
+        mark = match.group("mark")
+        status = "not_done"
+        if mark.lower() == "x":
+            status = "done"
+        elif mark in {"-", "~"}:
+            status = "partial"
+        tasks.append({
+            "content": normalize_text(match.group("text")),
+            "status": status,
+            "source": "checklist",
+        })
+    return tasks
+
+
+def parse_tool_tasks(name: str, payload: dict[str, Any]) -> list[dict[str, str]]:
+    tasks: list[dict[str, str]] = []
+    raw_items: Any = []
+    if isinstance(payload.get("todos"), list):
+        raw_items = payload.get("todos")
+    elif isinstance(payload.get("tasks"), list):
+        raw_items = payload.get("tasks")
+    elif name.lower() in {"todowrite", "taskcreate", "taskupdate"}:
+        raw_items = [payload]
+
+    if not isinstance(raw_items, list):
+        return tasks
+
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        content = normalize_text(
+            item.get("content")
+            or item.get("text")
+            or item.get("title")
+            or item.get("description")
+        )
+        if not content:
+            continue
+        raw_status = normalize_text(item.get("status") or item.get("state")).lower()
+        if raw_status in {"completed", "complete", "done", "success", "succeeded"}:
+            status = "done"
+        elif raw_status in {"in_progress", "in-progress", "active", "partial", "partially_done", "blocked"}:
+            status = "partial"
+        else:
+            status = "not_done"
+        tasks.append({"content": content, "status": status, "source": name})
+    return tasks
+
+
+def dedupe_task_items(items: list[dict[str, str]], limit: int | None = None) -> list[dict[str, str]]:
+    seen: OrderedDict[str, dict[str, str]] = OrderedDict()
+    for item in items:
+        content = normalize_text(item.get("content"))
+        if not content:
+            continue
+        key = f"{item.get('status', '')}:{content}"
+        seen.setdefault(key, {
+            "content": content,
+            "status": item.get("status", "not_done"),
+            "source": item.get("source", "unknown"),
+        })
+    values = list(seen.values())
+    if limit is not None:
+        return values[:limit]
+    return values
+
+
+def command_events(
+    tool_use_timeline: list[dict[str, Any]],
+    tool_result_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, str]]:
+    events: list[dict[str, str]] = []
+    for event in tool_use_timeline:
+        if event.get("tool") != "Bash":
+            continue
+        command = normalize_text(event.get("command"))
+        if not command:
+            continue
+        result = tool_result_by_id.get(normalize_text(event.get("id")))
+        outcome = "unknown"
+        output = ""
+        if result:
+            outcome = "fail" if result.get("is_error") else "pass"
+            output = normalize_text(result.get("text"))
+        events.append({"command": command, "outcome": outcome, "output": output})
+    return events
+
+
+def command_line(event: dict[str, str]) -> str:
+    outcome = event.get("outcome") or "unknown"
+    command = event.get("command") or ""
+    output = event.get("output") or ""
+    if output:
+        return f"- `{command}` -> {outcome}; {output}"
+    return f"- `{command}` -> {outcome}"
+
+
+def validation_events(command_event_items: list[dict[str, str]]) -> list[dict[str, str]]:
+    checks = []
+    for event in command_event_items:
+        lowered = event.get("command", "").lower()
+        if any(pattern in lowered for pattern in CHECK_PATTERNS):
+            checks.append(event)
+    return checks[:8]
+
+
+def runtime_state_lines(command_event_items: list[dict[str, str]]) -> list[str]:
+    lines = []
+    for event in command_event_items:
+        lowered = event.get("command", "").lower()
+        if any(pattern in lowered for pattern in RUNTIME_COMMAND_PATTERNS):
+            lines.append(command_line(event))
+    return dedupe(lines, limit=4)
+
+
+def completion_lines(assistant_texts: list[str], changed_files: list[str], command_event_items: list[dict[str, str]]) -> list[str]:
+    lines: list[str] = []
+    for text in assistant_texts:
+        for sentence in split_sentences(text):
+            if any(pattern.search(sentence) for pattern in COMPLETION_PATTERNS):
+                lines.append(f"- {sentence}")
+    for path in changed_files[:4]:
+        lines.append(f"- Edited `{path}` during this session.")
+    for event in command_event_items:
+        command = event.get("command", "")
+        if event.get("outcome") == "pass" and any(pattern in command.lower() for pattern in CHECK_PATTERNS):
+            lines.append(f"- Validation passed: `{command}`.")
+    return dedupe(lines, limit=8)
+
+
+def decision_lines(texts: list[str]) -> list[str]:
+    lines: list[str] = []
+    for text in texts:
+        for sentence in split_sentences(text):
+            if len(sentence) > 260:
+                continue
+            if any(pattern.search(sentence) for pattern in DECISION_PATTERNS):
+                lines.append(f"- {sentence}")
+    if not lines:
+        lines.append("- None captured in structured transcript facts.")
+    return dedupe(lines, limit=6)
+
+
+def build_stopping_point(
+    plan_state: dict[str, Any],
+    tool_use_timeline: list[dict[str, Any]],
+    tool_result_by_id: dict[str, dict[str, Any]],
+    assistant_milestones: list[str],
+    repo_root: str,
+) -> str:
+    if plan_state.get("in_plan_mode"):
+        plan_file = plan_state.get("plan_file") or "~/.claude/plans/"
+        return f"Paused in plan mode; read `{plan_file}` before implementation."
+
+    for event in reversed(tool_use_timeline):
+        result = tool_result_by_id.get(normalize_text(event.get("id")))
+        tool = event.get("tool", "")
+        if tool == "Bash":
+            command = normalize_text(event.get("command"))
+            if result and result.get("is_error"):
+                return f"Last captured command failed: `{command}` ({result.get('text')})."
+            if command:
+                outcome = "passed" if result and not result.get("is_error") else "ran"
+                return f"Last captured command {outcome}: `{command}`."
+        if tool in {"Edit", "MultiEdit", "Write"}:
+            path = display_path(event.get("path", ""), repo_root or None)
+            if path:
+                return f"Last captured edit targeted `{path}`."
+
+    if assistant_milestones:
+        return f"Last assistant milestone: {assistant_milestones[-1]}"
+    return "No concrete stopping point was captured; resume from Workspace Truth."
+
+
+def build_current_state(status: str, repo: dict[str, Any], failures: list[str], plan_state: dict[str, Any]) -> str:
+    if plan_state.get("in_plan_mode"):
+        return "Planning is paused; implementation has not been approved in the captured session."
+    if status == "blocked" and failures:
+        return f"Blocked on: {failures[0]}"
+    if repo.get("is_git"):
+        branch = repo.get("branch") or "detached"
+        cleanliness = "clean" if repo.get("status_clean") else "dirty"
+        return f"Repo `{repo.get('repo_root_display')}` is on `{branch}` with a {cleanliness} working tree."
+    return "No git repo was detected; use captured files and commands as the source of truth."
+
+
+def build_workspace_truth_lines(
+    repo: dict[str, Any],
+    changed_file_lines: list[str],
+    command_event_items: list[dict[str, str]],
+    runtime_lines: list[str],
+) -> list[str]:
+    lines: list[str] = []
+    if repo.get("is_git"):
+        branch = repo.get("branch") or "detached"
+        status = "clean" if repo.get("status_clean") else "dirty"
+        lines.append(f"- Repo: `{repo.get('repo_root_display')}` on branch `{branch}`; working tree is {status}.")
+        if repo.get("status_short"):
+            lines.append(f"- Dirty files: `{'; '.join(repo['status_short'][:6])}`")
+        if repo.get("recent_commits"):
+            commits = ", ".join(f"`{item['sha']}` {item['message']}" for item in repo["recent_commits"][:3])
+            lines.append(f"- Recent commits: {commits}")
+    else:
+        lines.append("- No git repository detected at the captured cwd.")
+
+    if changed_file_lines:
+        lines.extend(changed_file_lines[:8])
+    else:
+        lines.append("- Changed files: none captured.")
+
+    if command_event_items:
+        lines.extend(command_line(event) for event in command_event_items[-5:])
+    else:
+        lines.append("- Commands: none captured.")
+
+    if runtime_lines:
+        lines.extend(runtime_lines)
+    return dedupe(lines, limit=18)
+
+
+def build_task_ledger(
+    todo_items: list[dict[str, str]],
+    done_fallback: list[str],
+    failures: list[str],
+    next_steps: list[str],
+    repo: dict[str, Any],
+    plan_state: dict[str, Any],
+) -> dict[str, list[str]]:
+    done = [f"- {item['content']}" for item in todo_items if item.get("status") == "done"]
+    partial = [f"- {item['content']}" for item in todo_items if item.get("status") == "partial"]
+    not_done = [f"- {item['content']}" for item in todo_items if item.get("status") == "not_done"]
+
+    if not done:
+        done = done_fallback[:5]
+    if not partial:
+        if plan_state.get("in_plan_mode"):
+            partial.append("- Plan is drafted but implementation is still paused.")
+        if repo.get("is_git") and repo.get("status_short"):
+            partial.append("- Working tree still has uncommitted changes.")
+        partial.extend(f"- Resolve captured failure: {failure}" for failure in failures[:2])
+    if not not_done:
+        not_done.extend(f"- {step}" for step in next_steps[:3])
+
+    if not done:
+        done = ["- No completed tasks were explicitly captured."]
+    if not partial:
+        partial = ["- No partial tasks were explicitly captured."]
+    if not not_done:
+        not_done = ["- No remaining tasks were explicitly captured."]
+
+    return {
+        "done": dedupe(done, limit=8),
+        "partial": dedupe(partial, limit=6),
+        "not_done": dedupe(not_done, limit=6),
+    }
+
+
+def build_risk_lines(failures: list[str], repo: dict[str, Any], plan_state: dict[str, Any], validation_items: list[dict[str, str]]) -> list[str]:
+    lines = []
+    for failure in failures[:4]:
+        lines.append(f"- {failure}")
+    for event in validation_items:
+        if event.get("outcome") == "fail":
+            lines.append(command_line(event))
+    if plan_state.get("in_plan_mode"):
+        lines.append("- Implementation should not start until the plan is approved.")
+    if repo.get("probe_error"):
+        lines.append(f"- Repo probe warning: {repo['probe_error']}")
+    if not lines:
+        lines.append("- None captured.")
+    return dedupe(lines, limit=8)
+
+
+def build_do_not_redo_lines(done_lines: list[str], failures: list[str]) -> list[str]:
+    lines = []
+    for line in done_lines[:4]:
+        cleaned = line.removeprefix("- ").strip()
+        if cleaned and not cleaned.startswith("No completed"):
+            lines.append(f"- Do not redo completed work: {cleaned}")
+    for failure in failures[:3]:
+        lines.append(f"- Do not retry the failed approach without changing inputs: {failure}")
+    if not lines:
+        lines.append("- No completed or failed approaches were captured to avoid.")
+    return dedupe(lines, limit=6)
+
+
+def build_resume_packet(
+    *,
+    last_user_ask: str,
+    project_dir: str,
+    trigger: str,
+    status: str,
+    repo: dict[str, Any],
+    failures: list[str],
+    plan_state: dict[str, Any],
+    next_steps: list[str],
+    tool_use_timeline: list[dict[str, Any]],
+    tool_result_by_id: dict[str, dict[str, Any]],
+    assistant_milestones: list[str],
+    all_texts: list[str],
+    changed_file_lines: list[str],
+    changed_files: list[str],
+    todo_items: list[dict[str, str]],
+    repo_root: str,
+) -> dict[str, Any]:
+    command_items = command_events(tool_use_timeline, tool_result_by_id)
+    validation_items = validation_events(command_items)
+    runtime_lines = runtime_state_lines(command_items)
+    done_fallback = completion_lines(assistant_milestones, changed_files, command_items)
+    ledger = build_task_ledger(todo_items, done_fallback, failures, next_steps, repo, plan_state)
+    stopping_point = build_stopping_point(plan_state, tool_use_timeline, tool_result_by_id, assistant_milestones, repo_root)
+    current_state = build_current_state(status, repo, failures, plan_state)
+    goal = last_user_ask or f"Auto-save captured work in `{project_dir}` during `{trigger}`."
+    next_action = next_steps[0] if next_steps else "Review Workspace Truth and continue from the exact stopping point."
+
+    validation_lines = [command_line(event) for event in validation_items]
+    if not validation_lines:
+        validation_lines = ["- No validation command was captured."]
+
+    snapshot_lines = [
+        f"- Goal: {goal.rstrip('.!?')}.",
+        f"- Current state: {current_state}",
+        f"- Exact stopping point: {stopping_point}",
+        f"- Next action: {next_action}",
+    ]
+
+    return {
+        "snapshot_lines": snapshot_lines,
+        "task_ledger": ledger,
+        "workspace_truth_lines": build_workspace_truth_lines(repo, changed_file_lines, command_items, runtime_lines),
+        "decision_lines": decision_lines(all_texts),
+        "validation_lines": validation_lines,
+        "risk_lines": build_risk_lines(failures, repo, plan_state, validation_items),
+        "do_not_redo_lines": build_do_not_redo_lines(ledger.get("done", []), failures),
+        "next_action": next_action,
+        "stopping_point": stopping_point,
+        "command_events": command_items,
+        "validation_events": validation_items,
+    }
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("Usage: llm-history-context.py <work-file>", file=sys.stderr)
@@ -797,6 +1180,7 @@ def main() -> int:
     write_files: list[str] = []
     tool_names: list[str] = []
     error_results: list[str] = []
+    todo_items: list[dict[str, str]] = []
     snapshot_files: list[str] = []
     permission_mode_last = ""
     plan_attachment: dict[str, Any] | None = None
@@ -850,6 +1234,7 @@ def main() -> int:
                     if item_type == "text":
                         raw_text = item.get("text") or ""
                         sanitized = sanitize_transcript_text(raw_text, label=role)
+                        todo_items.extend(parse_checklist_tasks(sanitized))
                         text = normalize_text(sanitized)
                         if role == "assistant":
                             assistant_texts.append(text)
@@ -865,6 +1250,7 @@ def main() -> int:
                         payload = item.get("input", {})
                         if not isinstance(payload, dict):
                             continue
+                        todo_items.extend(parse_tool_tasks(name, payload))
                         command_text = ""
                         if name == "Bash":
                             command_text = normalize_text(payload.get("command"))
@@ -913,6 +1299,7 @@ def main() -> int:
     edit_files = dedupe(edit_files, limit=12)
     write_files = dedupe(write_files, limit=12)
     snapshot_files = dedupe(snapshot_files, limit=12)
+    todo_items = dedupe_task_items(todo_items, limit=20)
     touched_files = dedupe(write_files + edit_files + snapshot_files + read_files, limit=12)
     checks = classify_checks(bash_commands)
     failures = dedupe(error_results + collect_failures(assistant_texts), limit=6)
@@ -925,7 +1312,42 @@ def main() -> int:
     plan_state = build_plan_state(permission_mode_last, plan_attachment, exit_plan_mode_called)
     repo_root = repo.get("repo_root") or ""
     display_touched = [display_path(path, repo_root or None) for path in touched_files]
+    edited_file_displays = [
+        display_path(path, repo_root or None)
+        for path in dedupe(edit_files + write_files, limit=12)
+    ]
     working_state_lines = plan_note_lines(plan_state) + build_working_state_lines(repo, checks, display_touched)
+    changed_file_lines = build_file_lines(repo_root, read_files, edit_files + write_files, snapshot_files)
+    next_steps = build_next_steps(
+        repo,
+        display_touched,
+        checks,
+        failures,
+        project_dir,
+        plan_state=plan_state,
+        tool_use_timeline=tool_use_timeline,
+        tool_result_by_id=tool_result_by_id,
+        last_user_ask=last_user_ask,
+        repo_root=repo_root,
+    )
+    resume_packet = build_resume_packet(
+        last_user_ask=last_user_ask,
+        project_dir=project_dir,
+        trigger=normalize_text(work.get("hook_event")),
+        status=fallback_status,
+        repo=repo,
+        failures=failures,
+        plan_state=plan_state,
+        next_steps=next_steps,
+        tool_use_timeline=tool_use_timeline,
+        tool_result_by_id=tool_result_by_id,
+        assistant_milestones=assistant_milestones,
+        all_texts=recent_user_asks + assistant_milestones,
+        changed_file_lines=changed_file_lines,
+        changed_files=edited_file_displays,
+        todo_items=todo_items,
+        repo_root=repo_root,
+    )
 
     bundle = {
         "session": {
@@ -953,7 +1375,9 @@ def main() -> int:
             "snapshot_files": [display_path(path, repo_root or None) for path in snapshot_files],
             "touched_files": display_touched,
             "error_results": failures,
+            "todo_items": todo_items,
         },
+        "resume_packet": resume_packet,
         "derived": {
             "grounded_tags": grounded_tags,
             "fallback_title": fallback_title,
@@ -965,19 +1389,8 @@ def main() -> int:
                 summarize_remaining(fallback_status, repo, failures),
             ],
             "working_state_lines": working_state_lines,
-            "files_changed_lines": build_file_lines(repo_root, read_files, edit_files + write_files, snapshot_files),
-            "next_steps": build_next_steps(
-                repo,
-                display_touched,
-                checks,
-                failures,
-                project_dir,
-                plan_state=plan_state,
-                tool_use_timeline=tool_use_timeline,
-                tool_result_by_id=tool_result_by_id,
-                last_user_ask=last_user_ask,
-                repo_root=repo_root,
-            ),
+            "files_changed_lines": changed_file_lines,
+            "next_steps": next_steps,
             "failed_lines": [f"- {line}" for line in failures[:4]],
             "warning_lines": (
                 [f"- Repo probe warning: {repo['probe_error']}"] if repo.get("probe_error") else []

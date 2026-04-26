@@ -21,23 +21,26 @@ Rendering is fully deterministic: `scripts/llm-history-worker.sh` builds the mar
 
 ## Body Sections
 
-### 1. Executive Summary
-2-4 sentences summarizing what was accomplished and the session's purpose.
+### 1. Resume Snapshot
+Four bullets: goal, current state, exact stopping point, and next concrete action.
 
-### 2. Working State
-Exact current state grounded in transcript and repo facts: branch, cleanliness, checks run, what's done, what's partial, and what remains.
+### 2. Task Ledger
+Three subsections: DONE, PARTIALLY DONE, and NOT DONE. Uses explicit todos/checklists first, then grounded transcript facts.
 
-### 3. Files Changed
-Bulleted list of concrete file paths touched in the session facts. Only files actually edited or written appear; files only read for context are not listed as changed.
+### 3. Workspace Truth
+Repo path, branch, dirty files, changed files, relevant commands with outcomes, and runtime/service state when captured.
 
-### 4. Concrete Next Steps
-Numbered list of specific, actionable items with exact commands, file paths, or checks. Always present.
+### 4. Decisions And Rationale
+Only decisions that change future work. If none are captured, the section says so explicitly.
 
-### 5. Failed Approaches
-Optional. Included only when the grounded facts show a real failure, blocker, or rejected path.
+### 5. Validation Evidence
+Validation commands with pass, fail, or unknown outcome and a concise output summary when available.
 
-### 6. Warnings
-Optional. Included when the grounded facts record environment warnings, fragile assumptions, or probe errors.
+### 6. Risks, Blockers, And Unknowns
+Actionable uncertainties, blockers, failed commands, or plan-mode warnings. If none are captured, the section says so explicitly.
+
+### 7. Do Not Redo
+Completed work and failed approaches that the next agent should not repeat.
 
 ## File Naming Convention
 

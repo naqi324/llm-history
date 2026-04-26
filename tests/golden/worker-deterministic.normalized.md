@@ -16,24 +16,53 @@ tags:
 
 # Harden the save path
 
-## Executive Summary
+## Resume Snapshot
 
-The session focused on: Please add tests. Recent progress: Next step is verifying the prompt payload stays structured end-to-end. The work appears to be in progress; use the next steps below to resume from the latest grounded state.
+- Goal: Please add tests.
+- Current state: Repo `<TMP_ROOT>/llm-history` is on `main` with a clean working tree.
+- Exact stopping point: Last assistant milestone: Next step is verifying the prompt payload stays structured end-to-end.
+- Next action: Execute: Please add tests. Use `rg` to locate the relevant entry point.
 
-## Working State
+## Task Ledger
+
+### DONE
+
+- Switched from raw numeric locks to key-value locks with timestamps.
+- Added environment overrides for the vault, lock, and log locations.
+- Hardened the worker so malformed Claude output falls back instead of being saved raw.
+- Added a smoke harness with temp directories and a stub Claude binary.
+
+### PARTIALLY DONE
+
+- No partial tasks were explicitly captured.
+
+### NOT DONE
+
+- Execute: Please add tests. Use `rg` to locate the relevant entry point.
+- Run `cd <TMP_ROOT>/llm-history && git log -n 3 --oneline` to confirm the last recorded commit.
+
+## Workspace Truth
 
 - Repo: `<TMP_ROOT>/llm-history` on branch `main`; working tree is clean.
 - Recent commits: `<SHA>` Initial commit
+- Changed files: none recorded in this session.
+- Commands: none captured.
 
-## Files Changed
+## Decisions And Rationale
 
-- None recorded in this session.
+- None captured in structured transcript facts.
 
-## Concrete Next Steps
+## Validation Evidence
 
-1. Execute: Please add tests. Use `rg` to locate the relevant entry point.
-2. Run `cd <TMP_ROOT>/llm-history && git log -n 3 --oneline` to confirm the last recorded commit.
+- No validation command was captured.
 
-## Warnings
+## Risks, Blockers, And Unknowns
 
-- No file-history snapshot was available; file paths come from tool calls only.
+- None captured.
+
+## Do Not Redo
+
+- Do not redo completed work: Switched from raw numeric locks to key-value locks with timestamps.
+- Do not redo completed work: Added environment overrides for the vault, lock, and log locations.
+- Do not redo completed work: Hardened the worker so malformed Claude output falls back instead of being saved raw.
+- Do not redo completed work: Added a smoke harness with temp directories and a stub Claude binary.

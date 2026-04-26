@@ -17,7 +17,7 @@ Session context preservation skill for Claude Code. Saves structured markdown fi
 - `tests/exit-orchestrator-smoke.sh` — Temp-dir regression harness for ordered SessionEnd exit behavior
 - `tests/resume-readiness.sh` — Quality harness for grounded handoff usefulness across multiple session shapes
 - `tests/check_resume_readiness.py` — Rubric-based evaluator for generated handoffs
-- `tests/fixtures/` — Transcript fixtures and stub Claude responses for smoke tests
+- `tests/fixtures/` — Transcript fixtures for smoke and quality tests
 - `tests/golden/` — Normalized expected markdown outputs used by the smoke test
 - `tests/logs/` — Generated JSON quality reports (ignored except for `.gitkeep`)
 
@@ -56,7 +56,8 @@ Configured in `~/.claude/settings.json`:
 ## Worker Rendering
 
 - The worker builds a normalized grounded context bundle from transcript facts, tool calls/results, file-history snapshots, and lightweight repo probes.
-- Rendering is deterministic end-to-end: frontmatter and body are written directly from the bundle. No `claude -p` call.
+- Rendering is deterministic end-to-end: frontmatter and the resume-packet body are written directly from the bundle. No `claude -p` call.
+- The body is optimized for continuation: Resume Snapshot, Task Ledger, Workspace Truth, Decisions And Rationale, Validation Evidence, Risks/Blockers/Unknowns, and Do Not Redo.
 - `STATUS` is `completed`, `in-progress`, or `blocked` (derived from failure signals).
 - `RENDER_MODE=session-end-sync` is preserved as a log signal for the orchestrator but no longer branches rendering logic.
 
@@ -90,7 +91,9 @@ The harness uses temp directories and a stub Claude binary, so it never touches 
 
 | Surface | Read | Write | Mechanism |
 |---------|------|-------|-----------|
-| Claude Code CLI | QMD MCP | Auto (hooks) + manual | `~/.claude/skills/llm-history` symlink |
-| Claude Desktop | QMD MCP | N/A | QMD indexes Obsidian vault |
-| Codex CLI | QMD MCP | Manual only | `~/.agents/skills/llm-history` symlink |
-| Codex Desktop | QMD MCP | Manual only | Same as Codex CLI |
+| Claude Code CLI | Built-in QMD MCP (`qmd mcp`) | Auto (hooks) + manual | Claude compatibility skill path |
+| Claude Desktop | Built-in QMD MCP (`qmd mcp`) | N/A | QMD indexes Obsidian vault |
+| Codex CLI | Built-in QMD MCP or global `qmd` CLI fallback | Manual only | `~/.agents/skills/llm-history` |
+| Codex Desktop | Built-in QMD MCP or global `qmd` CLI fallback | Manual only | Same as Codex CLI |
+
+QMD's canonical skill path is `~/.agents/skills/qmd/SKILL.md`. Do not call repo-local QMD checkouts, `qmd/dist/cli/qmd.js`, or retired `qmd-setup` paths.

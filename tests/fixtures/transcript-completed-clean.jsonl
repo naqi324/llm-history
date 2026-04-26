@@ -1,0 +1,4 @@
+{"type":"custom-title","customTitle":"completed-clean-fixture"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Ship the docs cleanup."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Committed docs cleanup and pushed to origin/main."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"All clear -- no action needed."}]}}

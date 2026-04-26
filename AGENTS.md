@@ -8,15 +8,18 @@ Read SKILL.md and follow the 6-step workflow. The Write tool, Bash, and Glob too
 
 Key steps:
 1. Generate filename: `YYMMDD-<project>.md` (project from CWD basename, kebab-case)
-2. Gather session context: executive summary, key decisions, in-progress work, files, next steps
+2. Gather session context as a resume packet: goal, stopping point, task ledger, workspace truth, decisions, validation, risks, and do-not-redo guidance
 3. Write YAML frontmatter (date, saved_at, title, model, project, session_id, status, trigger, tags) + markdown body
 4. Save to `/Users/naqi.khan/Documents/Obsidian/LLM History/`
 
 ## Reading History
 
-Use QMD MCP to search existing history files:
-- `mcp__qmd__query` with collection "obsidian", intent "find session history for <topic>"
-- `mcp__qmd__get` to read full file content by path
+Use the built-in QMD install to search existing history files:
+- Prefer `mcp__qmd__query` from the `qmd` MCP server launched by `qmd mcp`, with collection "obsidian" and intent "find session history for <topic>"
+- Use `mcp__qmd__get` to read full file content by path when MCP is available
+- If MCP is unavailable, fall back to `qmd query --json --collection obsidian "find session history for <topic>"` and `qmd get <path>`
+
+The canonical QMD skill is `~/.agents/skills/qmd/SKILL.md`; `~/.claude/skills/qmd` is only a compatibility link. Do not use repo-local QMD checkouts, `qmd/dist/cli/qmd.js`, or retired `qmd-setup` paths.
 
 ## Limitations
 

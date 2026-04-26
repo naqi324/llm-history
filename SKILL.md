@@ -37,15 +37,15 @@ Save the current Claude Code session's context to the Obsidian vault as a struct
 
 ### Step 2: Gather Context
 
-Analyze the full conversation to extract the following. Write for a Claude Code session that has NEVER seen this codebase — every section must be self-contained and actionable.
+Analyze the full conversation to extract a compact resume packet. Write for a Claude Code session that has NEVER seen this codebase and needs to continue without repeating completed work.
 
-- **Executive summary**: 2-4 sentences stating (1) what the task was, (2) what was accomplished, (3) what remains. Be specific — not "updated config files" but "rewrote auth middleware to use JWT across 3 route handlers."
-- **Key decisions**: For each decision, include: what was chosen, what was rejected, why, and what failure mode was avoided. This prevents the next session from re-debating settled questions.
-- **Working state**: The exact state of the codebase RIGHT NOW — what is done and verified, what is untested, what is partially done (with the exact interruption point), what hasn't started. Include branch name, uncommitted changes, active config/hooks.
-- **Files changed**: Each file path with what specifically was changed (not just "updated") and its current state (working/untested/broken). Include 1-3 code snippets ONLY when they show non-obvious logic. Use `file:line` references.
-- **Concrete next steps**: Each step must include the exact command, file path, or specific check. Never write "review the code" — specify WHICH file, WHICH function, WHAT to verify.
-- **Failed approaches**: What was tried and didn't work, with the specific error or reason. Prevents retrying dead ends.
-- **Warnings**: Environment requirements, known bugs, fragile assumptions, or platform-specific gotchas.
+- **Resume Snapshot**: goal, current state, exact stopping point, and next concrete action.
+- **Task Ledger**: classify work as DONE, PARTIALLY DONE, and NOT DONE. Use explicit todo/checklist state first; otherwise infer carefully from grounded edits, commands, and assistant milestones.
+- **Workspace Truth**: repo path, branch, dirty files, changed files, commands with outcomes, and runtime/service state if relevant.
+- **Decisions And Rationale**: only decisions that change future work. Include what was chosen and why; omit generic commentary.
+- **Validation Evidence**: commands run, pass/fail/unknown outcome, and the important output summary.
+- **Risks, Blockers, And Unknowns**: concrete uncertainties or blockers the next agent can act on.
+- **Do Not Redo**: completed work and failed approaches the next agent should avoid repeating.
 
 Ground the note in concrete facts whenever possible:
 - repo state (`git status --short`, branch, recent commits)
@@ -90,52 +90,63 @@ tags:
 
 # <Descriptive 5-10 Word Session Title>
 
-## Executive Summary
+## Resume Snapshot
 
-<2-4 sentences: (1) what the task was, (2) what was accomplished, (3) what remains>
+- Goal: <what the user was trying to accomplish>
+- Current state: <what is true now>
+- Exact stopping point: <the last meaningful action, failure, or pause>
+- Next action: <one concrete command, file, or action>
 
-## Key Decisions
+## Task Ledger
 
-- **<What was chosen>** over <what was rejected>: <Why — concrete reason>. <What would go wrong with the rejected approach.>
+### DONE
 
-## Working State
+- <completed work>
 
-<Exact codebase state: what's done+verified, what's untested, what's partial (with interruption point), what hasn't started. Branch, uncommitted changes, active config/hooks.>
+### PARTIALLY DONE
 
-## Files Changed
+- <partial work plus what remains>
 
-- `path/to/file1.ext` — <specific change made, current state>
-- `path/to/file2.ext` — <specific change made, current state>
+### NOT DONE
 
-<Include 1-3 code snippets only when they show non-obvious logic. Use file:line refs.>
+- <remaining work>
 
-## Concrete Next Steps
+## Workspace Truth
 
-1. <Exact command or file path — independently executable, no ambiguity>
-2. <Next step with expected output or success criteria>
+- Repo: `<path>` on branch `<branch>`; working tree is <clean|dirty>.
+- Dirty files: `<git status --short summary>` or none.
+- `<command>` -> <pass|fail|unknown>; <important output if needed>
 
-## Failed Approaches
+## Decisions And Rationale
 
-- <What was tried, the specific error, why it didn't work. Omit section if nothing failed.>
+- <decision that affects future work, or "None captured in structured transcript facts.">
 
-## Warnings
+## Validation Evidence
 
-- <Environment requirements, known bugs, fragile assumptions. Omit section if none.>
+- `<command>` -> <pass|fail|unknown>; <important output summary>
+
+## Risks, Blockers, And Unknowns
+
+- <actionable uncertainty, blocker, or none captured>
+
+## Do Not Redo
+
+- <completed work or failed approach to avoid repeating>
 ```
 
 Key guidance:
 - The H1 title should be a descriptive 5-10 word phrase about what was accomplished, NOT the filename.
 - Derive 3-5 tags from session content — never use generic "llm-history" or "auto-save" for manual saves.
 - The `status` field should reflect whether the work is completed, in-progress, or blocked.
-- Always include `## Executive Summary`, `## Working State`, `## Files Changed`, and `## Concrete Next Steps` for any nontrivial save.
+- Always include the seven resume-packet sections shown above for any nontrivial save.
 - Never ask clarifying questions or write conversational filler in the saved handoff.
 - Use single quotes around the `title` value in YAML frontmatter to handle special characters.
 
 ## Gotchas
 
 - **Session ID may be wrong with multiple Claude instances**: The `ls -t ~/.claude/projects/*/*.jsonl | head -1` command returns the most recently modified transcript. If another Claude Code instance is running, this may not be the current session. Cross-check with the CWD project path.
-- **Saving near compaction risks incomplete context**: The note reflects what Claude currently remembers, not the full conversation. If context has been compacted, explicitly note which parts may be incomplete in the Working State section.
-- **300-line limit triage order**: When the file exceeds 300 lines, cut in this order: Failed Approaches, Warnings, then condense Files Changed. Never cut Concrete Next Steps or Working State -- these are essential for resumption.
+- **Saving near compaction risks incomplete context**: The note reflects what Claude currently remembers, not the full conversation. If context has been compacted, explicitly note which parts may be incomplete in Risks, Blockers, And Unknowns.
+- **300-line limit triage order**: When the file exceeds 300 lines, cut in this order: Do Not Redo, Decisions And Rationale, then condense Workspace Truth. Never cut Resume Snapshot, Task Ledger, Validation Evidence, or Risks/Blockers.
 - **YAML title values with special characters break Obsidian**: Colons, quotes, and hash characters in the `title` frontmatter field break Obsidian's YAML parser. Always wrap the title value in single quotes.
 
 ### Step 6: Confirm

@@ -40,10 +40,19 @@ DENIED_STEP_ONE_PATTERNS = (
 # (contains a '/' or a dotted file extension) OR a backticked command.
 STEP_ONE_HAS_PATH = re.compile(r"[/\\]|`[^`]*`")
 
-# Instruction-dump signal at the body level: we reject output where any body
-# section has 20+ consecutive lines that look like markdown headers. This is
-# independent of the context.py extractor check -- it's a final safety net.
+# Instruction-dump signal at the body level. Long legitimate handoffs can have
+# many bullets, so only flag long instruction-shaped runs when skill/prompt
+# markers are also present.
 INSTRUCTION_LINE = re.compile(r"^\s*(#{1,6}\s|[-*]\s|\d+\.\s|\*\*[^*]+\*\*:)")
+INSTRUCTION_MARKERS = (
+    "Base directory for this skill:",
+    "YAML frontmatter",
+    "Supported Flags",
+    "Skill Contract",
+    "Critical Rules",
+    ".claude/skills",
+    "SKILL.md",
+)
 
 
 def extract_frontmatter(text: str) -> dict[str, object]:
@@ -115,7 +124,13 @@ def is_malformed_title(title: str) -> bool:
 
 
 def has_instruction_dump_section(text: str) -> bool:
-    """Return True if any body span contains 20+ consecutive instruction-shaped lines."""
+    """Return True when a body span still looks like a pasted skill/instruction block."""
+    if "Base directory for this skill:" in text:
+        return True
+    marker_count = sum(1 for marker in INSTRUCTION_MARKERS if marker in text)
+    if marker_count < 2:
+        return False
+
     run = 0
     for line in text.splitlines():
         if INSTRUCTION_LINE.match(line):
@@ -132,10 +147,10 @@ def step_one_is_denied(step_text: str) -> bool:
     return any(pattern.match(cleaned) for pattern in DENIED_STEP_ONE_PATTERNS)
 
 
-def first_numbered_step(text: str) -> str:
-    section = section_body(text, "Concrete Next Steps")
+def resume_next_action(text: str) -> str:
+    section = section_body(text, "Resume Snapshot")
     for line in section.splitlines():
-        match = re.match(r"^\s*1\.\s+(.+)$", line)
+        match = re.match(r"^\s*-\s+Next action:\s+(.+)$", line)
         if match:
             return match.group(1).strip()
     return ""
@@ -169,27 +184,36 @@ def main() -> int:
     if not meaningful:
         failures.append("generic_tags")
 
-    for heading in ("Executive Summary", "Working State", "Files Changed", "Concrete Next Steps"):
+    for heading in (
+        "Resume Snapshot",
+        "Task Ledger",
+        "Workspace Truth",
+        "Decisions And Rationale",
+        "Validation Evidence",
+        "Risks, Blockers, And Unknowns",
+        "Do Not Redo",
+    ):
         if not section_present(text, heading):
             failures.append(f"missing_section:{heading}")
 
-    next_steps = section_body(text, "Concrete Next Steps")
-    if not re.search(r"(?m)^[0-9]+\.\s", next_steps):
-        failures.append("missing_numbered_next_steps")
+    task_ledger = section_body(text, "Task Ledger")
+    for subheading in ("DONE", "PARTIALLY DONE", "NOT DONE"):
+        if f"### {subheading}" not in task_ledger:
+            failures.append(f"missing_task_ledger:{subheading}")
 
     if any(pattern in lowered_text for pattern in FORBIDDEN_PATTERNS):
         failures.append("forbidden_clarifying_language")
 
-    files_changed_body = section_body(text, "Files Changed")
-    if FORBIDDEN_FILES_CHANGED_STRING in files_changed_body:
+    if FORBIDDEN_FILES_CHANGED_STRING in text:
         failures.append("forbidden_files_changed_string")
 
-    step_one = first_numbered_step(text)
-    if step_one:
-        if step_one_is_denied(step_one):
-            failures.append("denied_step_one")
-        if not STEP_ONE_HAS_PATH.search(step_one):
-            failures.append("step_one_not_concrete")
+    next_action = resume_next_action(text)
+    if not next_action:
+        failures.append("missing_next_action")
+    elif step_one_is_denied(next_action):
+        failures.append("denied_next_action")
+    elif not STEP_ONE_HAS_PATH.search(next_action):
+        failures.append("next_action_not_concrete")
 
     if has_instruction_dump_section(text):
         failures.append("instruction_dump_in_body")
@@ -206,9 +230,14 @@ def main() -> int:
 
     branch = bundle.get("repo", {}).get("branch", "")
     if bundle.get("repo", {}).get("is_git") and branch:
-        working_state = section_body(text, "Working State")
-        if branch not in working_state:
-            failures.append("missing_branch_in_working_state")
+        workspace_truth = section_body(text, "Workspace Truth")
+        if branch not in workspace_truth:
+            failures.append("missing_branch_in_workspace_truth")
+
+    if bundle.get("resume_packet", {}).get("validation_events"):
+        validation = section_body(text, "Validation Evidence")
+        if "->" not in validation:
+            failures.append("missing_validation_outcome")
 
     score = max(0, 100 - (len(failures) * 15))
     report = {

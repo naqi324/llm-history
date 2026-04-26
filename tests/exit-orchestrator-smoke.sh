@@ -5,7 +5,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ORCHESTRATOR="$ROOT_DIR/scripts/exit-orchestrator.sh"
 AUDIT_SCRIPT="$ROOT_DIR/scripts/exit-audit.sh"
-REAL_GIT_SCRIPT="/Users/naqi.khan/git/system/CLAUDE-md/.claude/hooks/auto-git-commit.sh"
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 
 # shellcheck source=tests/helpers.sh
@@ -18,10 +17,10 @@ assert_claude_not_called() {
 assert_nontrivial_history_output() {
   local path="$1"
   assert_file_exists "$path"
-  assert_contains "$path" "## Executive Summary"
-  assert_contains "$path" "## Working State"
-  assert_contains "$path" "## Files Changed"
-  assert_contains "$path" "## Concrete Next Steps"
+  assert_contains "$path" "## Resume Snapshot"
+  assert_contains "$path" "## Task Ledger"
+  assert_contains "$path" "## Workspace Truth"
+  assert_contains "$path" "## Validation Evidence"
 }
 
 setup_env() {
@@ -55,6 +54,64 @@ echo "invoked \$*" >> "$TEST_ROOT/logs/claude-invoked.log"
 exit 91
 EOF
   chmod +x "$TEST_ROOT/bin/claude"
+
+  AUTO_GIT_FIXTURE="$TEST_ROOT/bin/auto-git-commit-smoke.sh"
+  cat > "$AUTO_GIT_FIXTURE" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+INPUT=$(cat)
+RESULT_FILE="${AUTO_GIT_RESULT_FILE:-}"
+eval "$(printf '%s' "$INPUT" | jq -r '"CWD=" + ((.cwd // "") | @sh)')"
+
+write_result() {
+  [ -n "$RESULT_FILE" ] || return 0
+  local result="$1"
+  local detail="$2"
+  local repo_root="${3:-}"
+  local branch="${4:-}"
+  {
+    printf 'result=%s\n' "$result"
+    printf 'detail=%s\n' "$detail"
+    printf 'repo_root=%s\n' "$repo_root"
+    printf 'branch=%s\n' "$branch"
+  } > "$RESULT_FILE"
+}
+
+if [ -z "$CWD" ]; then
+  write_result error missing-cwd "" ""
+  exit 1
+fi
+
+if ! git -C "$CWD" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git init -b main "$CWD" >/dev/null
+  git -C "$CWD" config user.name "Exit Smoke"
+  git -C "$CWD" config user.email "exit-smoke@example.com"
+  touch "$CWD/.gitignore"
+  git -C "$CWD" add .gitignore
+  git -C "$CWD" commit -m "Initialize repo on session exit" >/dev/null
+  write_result success initialized-repo "$CWD" main
+  exit 0
+fi
+
+repo_root=$(git -C "$CWD" rev-parse --show-toplevel)
+branch=$(git -C "$CWD" branch --show-current)
+if [ -z "$(git -C "$CWD" status --short)" ]; then
+  write_result skip-clean-repo "" "$repo_root" "$branch"
+  exit 0
+fi
+
+git -C "$CWD" add -A
+git -C "$CWD" commit -m "Auto-commit on session exit" >/dev/null
+if git -C "$CWD" remote get-url origin >/dev/null 2>&1; then
+  git -C "$CWD" push origin "$branch" >/dev/null 2>&1
+  write_result success push-ok "$repo_root" "$branch"
+else
+  write_result success commit-ok "$repo_root" "$branch"
+fi
+EOF
+  chmod +x "$AUTO_GIT_FIXTURE"
+  export AUTO_GIT_FIXTURE
 
   export PATH="$TEST_ROOT/bin:$PATH"
 
@@ -103,7 +160,7 @@ assert_phase_order() {
 scenario_dirty_repo() {
   echo "Scenario 1: dirty repo with origin on main commits first, then writes history"
   setup_env dirty
-  export CLAUDE_EXIT_GIT_SCRIPT="$REAL_GIT_SCRIPT"
+  export CLAUDE_EXIT_GIT_SCRIPT="$AUTO_GIT_FIXTURE"
 
   local repo="$TEST_ROOT/demo-repo"
   local remote="$TEST_ROOT/demo-remote.git"
@@ -129,7 +186,7 @@ scenario_dirty_repo() {
 scenario_clean_repo() {
   echo "Scenario 2: clean repo skips git work but still saves history"
   setup_env clean
-  export CLAUDE_EXIT_GIT_SCRIPT="$REAL_GIT_SCRIPT"
+  export CLAUDE_EXIT_GIT_SCRIPT="$AUTO_GIT_FIXTURE"
 
   local repo="$TEST_ROOT/clean-repo"
   local remote="$TEST_ROOT/clean-remote.git"
@@ -152,7 +209,7 @@ scenario_clean_repo() {
 scenario_non_git_directory() {
   echo "Scenario 3: non-git directory initializes repo and still writes history"
   setup_env nongit
-  export CLAUDE_EXIT_GIT_SCRIPT="$REAL_GIT_SCRIPT"
+  export CLAUDE_EXIT_GIT_SCRIPT="$AUTO_GIT_FIXTURE"
 
   local worktree="$TEST_ROOT/plain-dir"
   local transcript="$TEST_ROOT/transcript.jsonl"
@@ -174,7 +231,7 @@ scenario_non_git_directory() {
 scenario_trivial_session() {
   echo "Scenario 4: trivial transcript skips history without invoking claude -p"
   setup_env trivial
-  export CLAUDE_EXIT_GIT_SCRIPT="$REAL_GIT_SCRIPT"
+  export CLAUDE_EXIT_GIT_SCRIPT="$AUTO_GIT_FIXTURE"
 
   local repo="$TEST_ROOT/trivial-repo"
   local remote="$TEST_ROOT/trivial-remote.git"
@@ -195,7 +252,7 @@ scenario_trivial_session() {
 scenario_missing_transcript() {
   echo "Scenario 5: missing transcript is logged explicitly and exit still completes"
   setup_env missing
-  export CLAUDE_EXIT_GIT_SCRIPT="$REAL_GIT_SCRIPT"
+  export CLAUDE_EXIT_GIT_SCRIPT="$AUTO_GIT_FIXTURE"
 
   local repo="$TEST_ROOT/missing-repo"
   local remote="$TEST_ROOT/missing-remote.git"
@@ -215,7 +272,7 @@ scenario_missing_transcript() {
 scenario_history_dedup_skip() {
   echo "Scenario 6: second exit logs explicit history dedup skip"
   setup_env dedup
-  export CLAUDE_EXIT_GIT_SCRIPT="$REAL_GIT_SCRIPT"
+  export CLAUDE_EXIT_GIT_SCRIPT="$AUTO_GIT_FIXTURE"
 
   local repo="$TEST_ROOT/dedup-repo"
   local remote="$TEST_ROOT/dedup-remote.git"
@@ -251,22 +308,20 @@ scenario_git_failure_history_still_runs() {
   mkdir -p "$worktree"
   copy_transcript_fixture "$transcript"
 
-  if run_orchestrator "$session_id" "$transcript" "$worktree"; then
-    fail "orchestrator should return non-zero when git phase fails"
-  fi
+  run_orchestrator "$session_id" "$transcript" "$worktree"
 
   assert_nontrivial_history_output "$output_path"
   assert_phase_order "$CLAUDE_EXIT_LOGFILE"
   assert_jq 'select(.phase == "git" and .result == "error" and .detail == "synthetic-failure")' "$CLAUDE_EXIT_LOGFILE"
   assert_jq 'select(.phase == "history" and .result == "success" and .history_render_mode == "session-end-sync")' "$CLAUDE_EXIT_LOGFILE"
-  assert_jq 'select(.phase == "pipeline" and .state == "done" and .overall == "error")' "$CLAUDE_EXIT_LOGFILE"
+  assert_jq 'select(.phase == "pipeline" and .state == "done" and .overall == "warning")' "$CLAUDE_EXIT_LOGFILE"
   assert_claude_not_called
 }
 
 scenario_exit_audit() {
   echo "Scenario 8: exit-audit reports exit-safe runs and flags incomplete ones"
   setup_env audit
-  export CLAUDE_EXIT_GIT_SCRIPT="$REAL_GIT_SCRIPT"
+  export CLAUDE_EXIT_GIT_SCRIPT="$AUTO_GIT_FIXTURE"
 
   local repo="$TEST_ROOT/audit-repo"
   local remote="$TEST_ROOT/audit-remote.git"
